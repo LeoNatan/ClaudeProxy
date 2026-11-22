@@ -78,6 +78,7 @@ final class LocalForwarder: @unchecked Sendable {
 				}
 				queue.async {
 					self.splices[id] = nil
+					self.pool.release(outbound)
 				}
 			}
 			splices[id] = splice
@@ -86,17 +87,17 @@ final class LocalForwarder: @unchecked Sendable {
 	}
 }
 
-/// Two connections piped into each other, with half-close propagated. Everything runs on one serial queue.
+/// Claude Code's connection piped into a host connection, with half-close propagated. Everything runs on one serial queue.
 private final class Splice: @unchecked Sendable {
 	private let inbound: NWConnection
-	private let outbound: NWConnection
+	private let outbound: HostConnection
 	private let queue: DispatchQueue
 	private var openDirections = 2
 	private var finished = false
 	var onFinish: (@Sendable () -> Void)?
 
 	/// `outbound` is a host connection that is already established.
-	init(inbound: NWConnection, outbound: NWConnection, queue: DispatchQueue) {
+	init(inbound: NWConnection, outbound: HostConnection, queue: DispatchQueue) {
 		self.inbound = inbound
 		self.outbound = outbound
 		self.queue = queue
@@ -112,10 +113,39 @@ private final class Splice: @unchecked Sendable {
 			}
 		}
 		inbound.stateUpdateHandler = endOnFailure
-		outbound.stateUpdateHandler = endOnFailure
+		outbound.connection.stateUpdateHandler = endOnFailure
 		inbound.start(queue: queue)
-		pump(from: inbound, to: outbound)
-		pump(from: outbound, to: inbound)
+		pump(from: inbound, to: outbound.connection)
+		pumpFromHost()
+	}
+
+	/// Host → Claude Code. Reads go through `HostConnection`, which may already hold what arrived while it was idle.
+	private func pumpFromHost() {
+		outbound.read { [weak self] event in
+			guard let self, !finished else {
+				return
+			}
+			if let data = event.data, !data.isEmpty {
+				inbound.send(content: data, completion: .contentProcessed { [weak self] error in
+					guard let self else {
+						return
+					}
+					if error != nil {
+						finish()
+					} else if event.isComplete {
+						closeDirection(inbound)
+					} else {
+						pumpFromHost()
+					}
+				})
+			} else if event.isComplete {
+				closeDirection(inbound)
+			} else if event.failed {
+				finish()
+			} else {
+				pumpFromHost()
+			}
+		}
 	}
 
 	private func pump(from source: NWConnection, to destination: NWConnection) {
@@ -160,7 +190,7 @@ private final class Splice: @unchecked Sendable {
 		}
 		finished = true
 		inbound.cancel()
-		outbound.cancel()
+		outbound.connection.cancel()
 		onFinish?()
 		onFinish = nil
 	}

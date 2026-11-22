@@ -68,9 +68,12 @@ final class ClientLink: @unchecked Sendable {
 
 	private func open() {
 		idle += 1
+		// Same keep-alive as the client: a client that vanishes is noticed after about 25 s.
 		let tcp = NWProtocolTCP.Options()
 		tcp.enableKeepalive = true
-		tcp.keepaliveIdle = 30
+		tcp.keepaliveIdle = 10
+		tcp.keepaliveInterval = 5
+		tcp.keepaliveCount = 3
 		let connection = ProxyConnection(connection: NWConnection(to: endpoint, using: NWParameters(tls: nil, tcp: tcp)), stateProvider: stateProvider)
 		let entry = Entry()
 		let id = ObjectIdentifier(connection)

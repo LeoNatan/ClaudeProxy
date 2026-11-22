@@ -107,13 +107,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 		}
 	}
 
-	private func fetchProfile(over connection: NWConnection?) {
+	private func fetchProfile(over connection: HostConnection?) {
 		guard let connection else {
 			fetching = false
 			updateIcon()
 			return
 		}
-		InfoClient.fetch(over: connection) { [weak self] result in
+		InfoClient.fetch(over: connection, pool: pool) { [weak self] result in
 			guard let self else {
 				return
 			}

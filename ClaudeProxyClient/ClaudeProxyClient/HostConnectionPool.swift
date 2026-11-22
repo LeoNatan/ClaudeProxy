@@ -1,6 +1,73 @@
 import Foundation
 import Network
 
+/// TCP keep-alive for host connections: a host that vanishes without closing (sleep, network loss) is noticed
+/// after about 10 s idle + 3 × 5 s probes.
+func makeKeepaliveTCPOptions() -> NWProtocolTCP.Options {
+	let tcp = NWProtocolTCP.Options()
+	tcp.enableKeepalive = true
+	tcp.keepaliveIdle = 10
+	tcp.keepaliveInterval = 5
+	tcp.keepaliveCount = 3
+	return tcp
+}
+
+/// One connection opened by the host. It has a single reader at all times, even while idle in the pool, so a host
+/// closing the connection is noticed immediately. Whatever that read returns goes to the current consumer: the pool
+/// while idle, the Claude Code connection it's paired with once handed out. Everything runs on the pool's queue.
+final class HostConnection: @unchecked Sendable {
+	struct Event {
+		let data: Data?
+		let isComplete: Bool
+		let failed: Bool
+	}
+
+	let connection: NWConnection
+	private var reading = false
+	private var buffered: Event?
+	private var handler: ((Event) -> Void)?
+
+	init(connection: NWConnection) {
+		self.connection = connection
+	}
+
+	/// Delivers the next chunk (or the close) to `handler`, exactly once.
+	func read(_ handler: @escaping (Event) -> Void) {
+		if let buffered {
+			self.buffered = nil
+			handler(buffered)
+			return
+		}
+		self.handler = handler
+		if !reading {
+			reading = true
+			connection.receive(minimumIncompleteLength: 1, maximumLength: 256 * 1024) { [weak self] data, _, isComplete, error in
+				guard let self else {
+					return
+				}
+				reading = false
+				let event = Event(data: data, isComplete: isComplete, failed: error != nil)
+				if let handler = self.handler {
+					self.handler = nil
+					handler(event)
+				} else {
+					buffered = event
+				}
+			}
+		}
+	}
+
+	/// Stops delivering to the current handler; a read already in flight is kept for the next one.
+	func detach() {
+		handler = nil
+	}
+
+	func cancel() {
+		handler = nil
+		connection.cancel()
+	}
+}
+
 /// Accepts the connections a ClaudeProxy host opens to this client and keeps them until Claude Code needs one.
 /// The client advertises itself over Bonjour so the host can find it; the host always connects out, which works
 /// even when the host Mac blocks incoming connections.
@@ -17,11 +84,13 @@ final class HostConnectionPool: @unchecked Sendable {
 	private var listener: NWListener?
 	private var port: UInt16 = 0
 	private var generation = 0
-	private var idle: [NWConnection] = []
-	private var waiters: [(id: UUID, handler: @Sendable (NWConnection?) -> Void)] = []
-	private var lastConnection: Date?
+	private var idle: [HostConnection] = []
+	/// Accepted connections not yet established; holds them until they join `idle`.
+	private var connecting: [ObjectIdentifier: HostConnection] = [:]
+	private var inUse = 0
+	private var waiters: [(id: UUID, handler: @Sendable (HostConnection?) -> Void)] = []
 	var onStatus: (@Sendable (Status) -> Void)?
-	/// Called when the set of idle host connections changes.
+	/// Called when host connections come or go.
 	var onChange: (@Sendable () -> Void)?
 
 	init(serviceName: String) {
@@ -30,7 +99,7 @@ final class HostConnectionPool: @unchecked Sendable {
 
 	/// Whether a host currently keeps connections open to this client.
 	var hasHost: Bool {
-		queue.sync { !idle.isEmpty || (lastConnection.map { Date().timeIntervalSince($0) < 15 } ?? false) }
+		queue.sync { !idle.isEmpty || inUse > 0 }
 	}
 
 	func start(port: UInt16) {
@@ -41,11 +110,10 @@ final class HostConnectionPool: @unchecked Sendable {
 	}
 
 	/// Hands out one idle host connection (already established), waiting up to `timeout` for one to arrive.
-	func take(timeout: TimeInterval, handler: @escaping @Sendable (NWConnection?) -> Void) {
+	/// Every connection handed out must be given back with `release(_:)` once finished.
+	func take(timeout: TimeInterval, handler: @escaping @Sendable (HostConnection?) -> Void) {
 		queue.async { [self] in
-			if !idle.isEmpty {
-				let connection = idle.removeFirst()
-				onChange?()
+			if let connection = popIdle() {
 				handler(connection)
 				return
 			}
@@ -60,6 +128,55 @@ final class HostConnectionPool: @unchecked Sendable {
 		}
 	}
 
+	/// Called (on `queue`) when a handed-out connection is done.
+	func release(_ connection: HostConnection) {
+		connection.cancel()
+		inUse -= 1
+		onChange?()
+	}
+
+	// MARK: Pool (on `queue`)
+
+	private func popIdle() -> HostConnection? {
+		guard !idle.isEmpty else {
+			return nil
+		}
+		let connection = idle.removeFirst()
+		connection.detach()
+		inUse += 1
+		onChange?()
+		return connection
+	}
+
+	private func addIdle(_ connection: HostConnection) {
+		if let waiter = waiters.first {
+			waiters.removeFirst()
+			inUse += 1
+			onChange?()
+			waiter.handler(connection)
+			return
+		}
+		idle.append(connection)
+		onChange?()
+		// The host never sends anything unprompted, so whatever this read returns means the connection is unusable:
+		// usually the host closing it because it quit or restarted.
+		connection.read { [weak self, weak connection] _ in
+			guard let self, let connection else {
+				return
+			}
+			removeIdle(connection)
+		}
+	}
+
+	private func removeIdle(_ connection: HostConnection) {
+		guard let index = idle.firstIndex(where: { $0 === connection }) else {
+			return
+		}
+		idle.remove(at: index)
+		connection.cancel()
+		onChange?()
+	}
+
 	// MARK: Listener (on `queue`)
 
 	private func listen(advertise: Bool) {
@@ -71,10 +188,7 @@ final class HostConnectionPool: @unchecked Sendable {
 			onStatus?(.failed("Invalid port \(port)."))
 			return
 		}
-		let tcp = NWProtocolTCP.Options()
-		tcp.enableKeepalive = true
-		tcp.keepaliveIdle = 30
-		let parameters = NWParameters(tls: nil, tcp: tcp)
+		let parameters = NWParameters(tls: nil, tcp: makeKeepaliveTCPOptions())
 		parameters.allowLocalEndpointReuse = true
 		let listener: NWListener
 		do {
@@ -123,31 +237,28 @@ final class HostConnectionPool: @unchecked Sendable {
 		}
 	}
 
-	private func accept(_ connection: NWConnection) {
-		lastConnection = Date()
-		connection.stateUpdateHandler = { [weak self, weak connection] state in
+	private func accept(_ nwConnection: NWConnection) {
+		let connection = HostConnection(connection: nwConnection)
+		let id = ObjectIdentifier(connection)
+		connecting[id] = connection
+		nwConnection.stateUpdateHandler = { [weak self, weak connection] state in
 			guard let self, let connection else {
 				return
 			}
 			switch state {
 			case .ready:
-				if let waiter = waiters.first {
-					waiters.removeFirst()
-					waiter.handler(connection)
-				} else {
-					idle.append(connection)
-					onChange?()
+				if connecting.removeValue(forKey: id) != nil {
+					addIdle(connection)
 				}
 			case .failed, .cancelled:
-				if let index = idle.firstIndex(where: { $0 === connection }) {
-					idle.remove(at: index)
-					onChange?()
-				}
+				// Keep-alive giving up, or the connection being torn down.
+				connecting[id] = nil
+				removeIdle(connection)
 			default:
 				break
 			}
 		}
-		connection.start(queue: queue)
+		nwConnection.start(queue: queue)
 	}
 }
 
@@ -157,13 +268,14 @@ enum InfoClient {
 		let errorDescription: String?
 	}
 
-	static func fetch(over connection: NWConnection, completion: @escaping @MainActor (Result<ClientProfile, Error>) -> Void) {
+	/// Runs on the pool's queue; hands the connection back to the pool when done.
+	static func fetch(over connection: HostConnection, pool: HostConnectionPool, completion: @escaping @MainActor (Result<ClientProfile, Error>) -> Void) {
 		final class State: @unchecked Sendable {
 			var data = Data()
 			var finished = false
 		}
 		let state = State()
-		let queue = DispatchQueue(label: "ClaudeProxyClient.info")
+		let queue = pool.queue
 
 		@Sendable func finish(_ result: Result<ClientProfile, Error>) {
 			queue.async {
@@ -171,7 +283,7 @@ enum InfoClient {
 					return
 				}
 				state.finished = true
-				connection.cancel()
+				pool.release(connection)
 				DispatchQueue.main.async {
 					MainActor.assumeIsolated {
 						completion(result)
@@ -181,14 +293,14 @@ enum InfoClient {
 		}
 
 		@Sendable func receive() {
-			connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { data, _, isComplete, error in
-				if let data {
+			connection.read { event in
+				if let data = event.data {
 					state.data.append(data)
 				}
-				if isComplete {
+				if event.isComplete {
 					finish(parse(state.data))
-				} else if let error {
-					finish(.failure(error))
+				} else if event.failed {
+					finish(.failure(InfoError(errorDescription: "The host closed the connection.")))
 				} else if state.data.count > 1024 * 1024 {
 					finish(.failure(InfoError(errorDescription: "Response too large.")))
 				} else {
@@ -197,13 +309,15 @@ enum InfoClient {
 			}
 		}
 
-		let request = "GET \(ClaudeProxyProtocol.infoPath) HTTP/1.1\r\nHost: claudeproxy\r\nConnection: close\r\n\r\n"
-		connection.send(content: Data(request.utf8), completion: .contentProcessed { error in
-			if let error {
-				finish(.failure(error))
-			}
-		})
-		receive()
+		queue.async {
+			let request = "GET \(ClaudeProxyProtocol.infoPath) HTTP/1.1\r\nHost: claudeproxy\r\nConnection: close\r\n\r\n"
+			connection.connection.send(content: Data(request.utf8), completion: .contentProcessed { error in
+				if error != nil {
+					finish(.failure(InfoError(errorDescription: "The host closed the connection.")))
+				}
+			})
+			receive()
+		}
 		queue.asyncAfter(deadline: .now() + 8) {
 			finish(.failure(InfoError(errorDescription: "The host did not respond.")))
 		}
