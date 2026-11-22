@@ -134,7 +134,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 	}
 
 	private func updateIcon() {
-		let healthy = state.map { $0.problems.isEmpty } ?? false
+		// Only a configuration problem that stops every request earns the warning; still loading settings doesn't.
+		let healthy = state.map { $0.problems.isEmpty } ?? true
 		statusItem.button?.image = NSImage(systemSymbolName: healthy ? "xserve.raid" : "exclamationmark.triangle", accessibilityDescription: "ClaudeProxy Host")
 	}
 

@@ -66,14 +66,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 				}
 			}
 		}
-		// A host connecting for the first time is the moment to learn its profile.
+		// Host connections coming and going change the icon; a host connecting for the first time is the moment to learn its profile.
 		pool.onChange = { [weak self] in
 			DispatchQueue.main.async {
 				MainActor.assumeIsolated {
-					guard let self, self.profile == nil || self.profileError != nil else {
+					guard let self else {
 						return
 					}
-					self.fetchProfile()
+					self.updateIcon()
+					if self.profile == nil || self.profileError != nil {
+						self.fetchProfile()
+					}
 				}
 			}
 		}
@@ -181,7 +184,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 			}
 			return pool.hasHost && profile != nil && profileError == nil && installError == nil
 		}()
-		let symbol = healthy ? (installer.isInstalled ? "point.3.filled.connected.trianglepath.dotted" : "point.3.connected.trianglepath.dotted") : "exclamationmark.triangle"
+		// Filled while a host is connected and serving; the menu explains anything else.
+		let symbol = healthy ? "point.3.filled.connected.trianglepath.dotted" : "point.3.connected.trianglepath.dotted"
 		statusItem.button?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: "ClaudeProxy Client")
 	}
 
