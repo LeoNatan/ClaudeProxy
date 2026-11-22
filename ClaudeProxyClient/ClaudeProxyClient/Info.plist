@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleIcons</key>
+	<dict>
+		<key>ISGraphicIconConfiguration</key>
+		<dict>
+			<key>ISSymbolName</key>
+			<string>laptopcomputer</string>
+			<key>ISEnclosureColor</key>
+			<string>blue</string>
+			<key>ISSymbolColor</key>
+			<string>white</string>
+		</dict>
+	</dict>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_claudeproxy._tcp</string>
+	</array>
+</dict>
+</plist>
