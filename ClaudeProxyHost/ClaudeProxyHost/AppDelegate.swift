@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 	private static let serviceName = Host.current().localizedName ?? "ClaudeProxy Host"
 
 	private var statusItem: NSStatusItem!
+	private let updater = Updater()
 	private let links = ClientLinkManager()
 	private let browser = ClientBrowser()
 	private var state: HostState?
@@ -250,6 +251,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
 		menu.addItem(.separator())
 		menu.addItem(item(reloading ? "Reloading…" : "Reload Claude Settings", #selector(reloadSettings)))
+		menu.addItem(updater.makeMenuItem())
 		let login = item("Start at Login", #selector(toggleLogin))
 		login.state = SMAppService.mainApp.status == .enabled ? .on : .off
 		menu.addItem(login)

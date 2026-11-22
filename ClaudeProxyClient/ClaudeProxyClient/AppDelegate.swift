@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 	private static let serviceName = Host.current().localizedName ?? "ClaudeProxy Client"
 
 	private var statusItem: NSStatusItem!
+	private let updater = Updater()
 	private let pool = HostConnectionPool(serviceName: AppDelegate.serviceName)
 	private lazy var forwarder = LocalForwarder(pool: pool)
 	private let installer = SettingsInstaller()
@@ -280,6 +281,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 		menu.addItem(.separator())
 		menu.addItem(item("Local Port \(localPort)…", #selector(changeLocalPort)))
 		menu.addItem(item("Network Port \(networkPort)…", #selector(changeNetworkPort)))
+		menu.addItem(updater.makeMenuItem())
 		let login = item("Start at Login", #selector(toggleLogin))
 		login.state = SMAppService.mainApp.status == .enabled ? .on : .off
 		menu.addItem(login)
