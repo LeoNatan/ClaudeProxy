@@ -177,9 +177,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
 		let statuses = links.statuses()
 		let excluded = excludedClients
-		menu.addItem(info("Clients"))
+		menu.addItem(.sectionHeader(title: "Clients"))
 		if browser.clients.isEmpty && manualClients.isEmpty {
-			menu.addItem(info("    None found yet"))
+			menu.addItem(info("None found yet"))
 		}
 		func addClient(title: String, key: String) {
 			let status: String
@@ -193,7 +193,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 			let client = item("\(title) — \(status)", #selector(toggleClient(_:)))
 			client.representedObject = key
 			client.state = excluded.contains(key) ? .off : .on
-			client.indentationLevel = 1
 			menu.addItem(client)
 		}
 		for client in browser.clients {
@@ -203,11 +202,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 			addClient(title: address, key: Self.manualKey(address))
 		}
 		let add = item("Add Client by Address…", #selector(addManualClient))
-		add.indentationLevel = 1
 		menu.addItem(add)
 		if !manualClients.isEmpty {
 			let remove = NSMenuItem(title: "Remove Client by Address", action: nil, keyEquivalent: "")
-			remove.indentationLevel = 1
 			let removeMenu = NSMenu()
 			for address in manualClients {
 				let entry = item(address, #selector(removeManualClient(_:)))
@@ -278,14 +275,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 				continue
 			}
 			let shown = setting.value.isEmpty ? "(unset)" : CredentialStore.isSecret(name) ? "(set)" : setting.value
-			menu.addItem(info("\(name) = \(shown)\n    \(setting.source)"))
+			menu.addItem(info("\(name) = \(shown)\n\(setting.source)"))
 			any = true
 		}
 		for name in HostState.displayedKeys {
 			guard let setting = settings.keys[name] else {
 				continue
 			}
-			menu.addItem(info("\(name) = \(setting.value)\n    \(setting.source)"))
+			menu.addItem(info("\(name) = \(setting.value)\n\(setting.source)"))
 			any = true
 		}
 		if !any {

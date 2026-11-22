@@ -133,13 +133,13 @@ private final class Splice: @unchecked Sendable {
 					if error != nil {
 						finish()
 					} else if event.isComplete {
-						closeDirection(inbound)
+						endFromHost()
 					} else {
 						pumpFromHost()
 					}
 				})
 			} else if event.isComplete {
-				closeDirection(inbound)
+				endFromHost()
 			} else if event.failed {
 				finish()
 			} else {
@@ -174,6 +174,14 @@ private final class Splice: @unchecked Sendable {
 				pump(from: source, to: destination)
 			}
 		}
+	}
+
+	/// The host closed its side (it quit, or finished with the connection): nothing more can come from it, so close
+	/// Claude Code's connection as well, after what was already sent, instead of waiting for Claude Code to close it.
+	private func endFromHost() {
+		inbound.send(content: nil, contentContext: .finalMessage, isComplete: true, completion: .contentProcessed { [weak self] _ in
+			self?.finish()
+		})
 	}
 
 	private func closeDirection(_ destination: NWConnection) {

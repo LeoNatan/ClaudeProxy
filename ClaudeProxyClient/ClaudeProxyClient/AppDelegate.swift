@@ -248,24 +248,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 		let hosts = pool.knownHosts
 		if hosts.count > 1 || hosts.contains(where: { !$0.isSelected }) {
 			menu.addItem(.separator())
-			menu.addItem(info("Hosts"))
+			menu.addItem(.sectionHeader(title: "Hosts"))
 			for host in hosts {
 				let suffix = host.isSelected ? (hasHost ? "" : " — offline") : ""
 				let entry = item(host.name + suffix, #selector(selectHost(_:)))
 				entry.representedObject = host.id
 				entry.state = host.isSelected ? .on : .off
-				entry.indentationLevel = 1
 				menu.addItem(entry)
 			}
 		}
 
 		let addresses = Self.localAddresses()
 		if !addresses.isEmpty {
-			menu.addItem(info("Copy Address for the Host’s “Add Client by Address”:"))
+			menu.addItem(.sectionHeader(title: "Copy Address for the Host"))
 			for address in addresses {
 				let copy = item("\(address.ip):\(networkPort)  (\(address.interface))", #selector(copyAddress(_:)))
 				copy.representedObject = "\(address.ip):\(networkPort)"
-				copy.indentationLevel = 1
 				menu.addItem(copy)
 			}
 		}
