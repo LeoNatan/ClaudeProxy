@@ -5,8 +5,9 @@ enum ClaudeProxyProtocol {
 	static let serviceType = "_claudeproxy._tcp"
 	static let version = 1
 	static let infoPath = "/_claudeproxy/info"
-	static let defaultServerPort: UInt16 = 52880
-	static let defaultClientPort: UInt16 = 52881
+	/// Below macOS's ephemeral range (49152–65535), where outgoing connections can already hold a port.
+	static let defaultServerPort: UInt16 = 41820
+	static let defaultClientPort: UInt16 = 41821
 	/// Sent by clients in place of a real credential; the server always replaces it.
 	static let placeholderToken = "claudeproxy-placeholder"
 }
