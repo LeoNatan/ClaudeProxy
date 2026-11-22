@@ -340,9 +340,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 	}
 
 	private func info(_ title: String) -> NSMenuItem {
-		let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-		item.isEnabled = false
-		return item
+		NSMenuItem.info(title)
 	}
 
 	private func item(_ title: String, _ action: Selector, key: String = "") -> NSMenuItem {
@@ -465,12 +463,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 		alert.accessoryView = field
 		alert.addButton(withTitle: "Save")
 		alert.addButton(withTitle: "Cancel")
+		alert.addButton(withTitle: "Use Default (\(ClaudeProxyProtocol.defaultClientPort))")
 		alert.window.initialFirstResponder = field
-		guard alert.runModal() == .alertFirstButtonReturn else {
-			return
-		}
-		guard let newPort = UInt16(field.stringValue.trimmingCharacters(in: .whitespaces)), newPort > 0 else {
-			NSSound.beep()
+		let newPort: UInt16
+		switch alert.runModal() {
+		case .alertFirstButtonReturn:
+			guard let value = UInt16(field.stringValue.trimmingCharacters(in: .whitespaces)), value > 0 else {
+				NSSound.beep()
+				return
+			}
+			newPort = value
+		case .alertThirdButtonReturn:
+			newPort = ClaudeProxyProtocol.defaultClientPort
+		default:
 			return
 		}
 		localPort = newPort

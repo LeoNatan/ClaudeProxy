@@ -18,8 +18,10 @@ final class CredentialStore: @unchecked Sendable {
 	private var dynamicSecrets: Set<String> = []
 
 	let customHeaders: [(name: String, value: String)]
-	/// Credential type and where it came from. Never contains the value.
+	/// Short credential type for the menu. Never contains the value.
 	let summary: String
+	/// Where the credential and any custom headers came from. Never contains values.
+	let details: [String]
 	/// A configuration problem detectable without running anything.
 	let problem: String?
 
@@ -60,11 +62,18 @@ final class CredentialStore: @unchecked Sendable {
 		}
 		self.customHeaders = headers
 
+		var details: [String] = []
 		func describe(_ kind: String, variable: String) -> String {
-			"\(kind) — \(variable) from \(settings.env[variable]?.source ?? "?")"
+			details.append("\(variable) from \(settings.env[variable]?.source ?? "?")")
+			return kind
 		}
 		func describeKey(_ kind: String, key: String) -> String {
-			"\(kind) — \(key) from \(settings.keys[key]?.source ?? "?")"
+			details.append("\(key) from \(settings.keys[key]?.source ?? "?")")
+			return kind
+		}
+		func skipped() -> String {
+			details.append("\(plan.provider.skipAuthVariable!) is set")
+			return "None"
 		}
 
 		var problem: String?
@@ -83,7 +92,7 @@ final class CredentialStore: @unchecked Sendable {
 			}
 		case .bedrock, .mantle:
 			if plan.skipAuth {
-				summary = settings.value("ANTHROPIC_AUTH_TOKEN") != nil ? describe("Gateway bearer token", variable: "ANTHROPIC_AUTH_TOKEN") : "None (\(plan.provider.skipAuthVariable!) is set)"
+				summary = settings.value("ANTHROPIC_AUTH_TOKEN") != nil ? describe("Gateway bearer token", variable: "ANTHROPIC_AUTH_TOKEN") : skipped()
 			} else if settings.value("AWS_BEARER_TOKEN_BEDROCK") != nil {
 				summary = describe("Bedrock API key", variable: "AWS_BEARER_TOKEN_BEDROCK")
 			} else if plan.provider == .mantle {
@@ -94,11 +103,12 @@ final class CredentialStore: @unchecked Sendable {
 			} else if settings.value("AWS_ACCESS_KEY_ID") != nil {
 				summary = describe("AWS SigV4", variable: "AWS_ACCESS_KEY_ID")
 			} else {
-				summary = "AWS SigV4 — aws CLI credential chain\(settings.value("AWS_PROFILE").map { " (profile \($0))" } ?? "")"
+				summary = "AWS SigV4"
+				details.append("aws CLI credential chain\(settings.value("AWS_PROFILE").map { " (profile \($0))" } ?? "")")
 			}
 		case .anthropicAWS:
 			if plan.skipAuth {
-				summary = settings.value("ANTHROPIC_AUTH_TOKEN") != nil ? describe("Gateway bearer token", variable: "ANTHROPIC_AUTH_TOKEN") : "None (\(plan.provider.skipAuthVariable!) is set)"
+				summary = settings.value("ANTHROPIC_AUTH_TOKEN") != nil ? describe("Gateway bearer token", variable: "ANTHROPIC_AUTH_TOKEN") : skipped()
 			} else if settings.value("ANTHROPIC_AWS_API_KEY") != nil {
 				summary = describe("API key", variable: "ANTHROPIC_AWS_API_KEY")
 			} else {
@@ -107,22 +117,28 @@ final class CredentialStore: @unchecked Sendable {
 			}
 		case .vertex:
 			if plan.skipAuth {
-				summary = settings.value("ANTHROPIC_AUTH_TOKEN") != nil ? describe("Gateway bearer token", variable: "ANTHROPIC_AUTH_TOKEN") : "None (\(plan.provider.skipAuthVariable!) is set)"
+				summary = settings.value("ANTHROPIC_AUTH_TOKEN") != nil ? describe("Gateway bearer token", variable: "ANTHROPIC_AUTH_TOKEN") : skipped()
 			} else {
-				summary = "Google application-default credentials (gcloud)"
+				summary = "Google Cloud token"
+				details.append("gcloud application-default credentials")
 			}
 		case .foundry:
 			if plan.skipAuth {
-				summary = "None (\(plan.provider.skipAuthVariable!) is set)"
+				summary = skipped()
 			} else if settings.value("ANTHROPIC_FOUNDRY_AUTH_TOKEN") != nil {
 				summary = describe("Bearer token", variable: "ANTHROPIC_FOUNDRY_AUTH_TOKEN")
 			} else if settings.value("ANTHROPIC_FOUNDRY_API_KEY") != nil {
 				summary = describe("API key", variable: "ANTHROPIC_FOUNDRY_API_KEY")
 			} else {
-				summary = "Azure credentials (az CLI)"
+				summary = "Azure token"
+				details.append("az CLI credentials")
 			}
 		}
-		self.summary = headers.isEmpty ? summary : summary + " + \(headers.count) custom header(s)"
+		if !headers.isEmpty {
+			details.append("Custom headers: \(headers.map(\.0).joined(separator: ", ")) (ANTHROPIC_CUSTOM_HEADERS from \(settings.env["ANTHROPIC_CUSTOM_HEADERS"]?.source ?? "?"))")
+		}
+		self.summary = summary
+		self.details = details
 		self.problem = problem
 	}
 

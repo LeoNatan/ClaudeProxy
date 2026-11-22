@@ -26,7 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 	func applicationDidFinishLaunching(_ notification: Notification) {
 		installEditMenu()
 		statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-		statusItem.button?.image = NSImage(systemSymbolName: "server.rack", accessibilityDescription: "ClaudeProxy Server")
+		statusItem.button?.image = NSImage(systemSymbolName: "xserve.raid", accessibilityDescription: "ClaudeProxy Server")
 		let menu = NSMenu()
 		menu.delegate = self
 		statusItem.menu = menu
@@ -104,7 +104,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 			}
 			return state.problems.isEmpty
 		}()
-		statusItem.button?.image = NSImage(systemSymbolName: healthy ? "server.rack" : "exclamationmark.triangle", accessibilityDescription: "ClaudeProxy Server")
+		statusItem.button?.image = NSImage(systemSymbolName: healthy ? "xserve.raid" : "exclamationmark.triangle", accessibilityDescription: "ClaudeProxy Server")
 	}
 
 	/// Menu bar apps get no main menu, and without an Edit menu text fields don't receive ⌘X/⌘C/⌘V/⌘A/⌘Z.
@@ -161,7 +161,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 			menu.addItem(.separator())
 			menu.addItem(info("Provider: \(state.plan.provider.displayName)\(state.plan.region.map { " (\($0))" } ?? "")"))
 			menu.addItem(info("Upstream: \(state.plan.displayUpstream)"))
-			menu.addItem(info("Credentials: \(state.credentials.summary)"))
+			let credentials = NSMenuItem(title: "Credentials: \(state.credentials.summary)", action: nil, keyEquivalent: "")
+			if !state.credentials.details.isEmpty {
+				let details = NSMenu()
+				for detail in state.credentials.details {
+					details.addItem(info(detail))
+				}
+				credentials.submenu = details
+			} else {
+				credentials.isEnabled = false
+			}
+			menu.addItem(credentials)
 			if let network = state.network.summary {
 				menu.addItem(info("Network: \(network)"))
 			}
@@ -207,14 +217,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 				continue
 			}
 			let shown = setting.value.isEmpty ? "(unset)" : CredentialStore.isSecret(name) ? "(set)" : setting.value
-			menu.addItem(info("\(name) = \(shown)  — \(setting.source)"))
+			menu.addItem(info("\(name) = \(shown)\n    \(setting.source)"))
 			any = true
 		}
 		for name in ServerState.displayedKeys {
 			guard let setting = settings.keys[name] else {
 				continue
 			}
-			menu.addItem(info("\(name) = \(setting.value)  — \(setting.source)"))
+			menu.addItem(info("\(name) = \(setting.value)\n    \(setting.source)"))
 			any = true
 		}
 		if !any {
@@ -226,9 +236,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 	}
 
 	private func info(_ title: String) -> NSMenuItem {
-		let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
-		item.isEnabled = false
-		return item
+		NSMenuItem.info(title)
 	}
 
 	private func item(_ title: String, _ action: Selector, key: String = "") -> NSMenuItem {
@@ -249,12 +257,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 		alert.accessoryView = field
 		alert.addButton(withTitle: "Save")
 		alert.addButton(withTitle: "Cancel")
+		alert.addButton(withTitle: "Use Default (\(ClaudeProxyProtocol.defaultServerPort))")
 		alert.window.initialFirstResponder = field
-		guard alert.runModal() == .alertFirstButtonReturn else {
-			return
-		}
-		guard let newPort = UInt16(field.stringValue.trimmingCharacters(in: .whitespaces)), newPort > 0 else {
-			NSSound.beep()
+		let newPort: UInt16
+		switch alert.runModal() {
+		case .alertFirstButtonReturn:
+			guard let value = UInt16(field.stringValue.trimmingCharacters(in: .whitespaces)), value > 0 else {
+				NSSound.beep()
+				return
+			}
+			newPort = value
+		case .alertThirdButtonReturn:
+			newPort = ClaudeProxyProtocol.defaultServerPort
+		default:
 			return
 		}
 		port = newPort

@@ -7,7 +7,7 @@
 		<key>ISGraphicIconConfiguration</key>
 		<dict>
 			<key>ISSymbolName</key>
-			<string>server.rack</string>
+			<string>xserve.raid</string>
 			<key>ISEnclosureColor</key>
 			<string>orange</string>
 			<key>ISSymbolColor</key>
