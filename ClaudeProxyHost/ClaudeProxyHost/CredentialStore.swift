@@ -20,7 +20,7 @@ final class CredentialStore: @unchecked Sendable {
 	let customHeaders: [(name: String, value: String)]
 	/// Short credential type for the menu. Never contains the value.
 	let summary: String
-	/// Where the credential and any custom headers came from. Never contains values.
+	/// Where the credential came from. Never contains values.
 	let details: [String]
 	/// A configuration problem detectable without running anything.
 	let problem: String?
@@ -81,20 +81,20 @@ final class CredentialStore: @unchecked Sendable {
 		switch plan.provider {
 		case .anthropic:
 			if settings.value("ANTHROPIC_AUTH_TOKEN") != nil {
-				summary = describe("Bearer token", variable: "ANTHROPIC_AUTH_TOKEN")
+				summary = describe("Bearer Token", variable: "ANTHROPIC_AUTH_TOKEN")
 			} else if settings.value("ANTHROPIC_API_KEY") != nil {
-				summary = describe("API key", variable: "ANTHROPIC_API_KEY")
+				summary = describe("API Key", variable: "ANTHROPIC_API_KEY")
 			} else if settings.key("apiKeyHelper") != nil {
-				summary = describeKey("API key helper", key: "apiKeyHelper")
+				summary = describeKey("API Key Helper", key: "apiKeyHelper")
 			} else {
 				summary = "None"
 				problem = "No API credentials found (ANTHROPIC_AUTH_TOKEN, ANTHROPIC_API_KEY or apiKeyHelper). OAuth logins are not used."
 			}
 		case .bedrock, .mantle:
 			if plan.skipAuth {
-				summary = settings.value("ANTHROPIC_AUTH_TOKEN") != nil ? describe("Gateway bearer token", variable: "ANTHROPIC_AUTH_TOKEN") : skipped()
+				summary = settings.value("ANTHROPIC_AUTH_TOKEN") != nil ? describe("Gateway Bearer Token", variable: "ANTHROPIC_AUTH_TOKEN") : skipped()
 			} else if settings.value("AWS_BEARER_TOKEN_BEDROCK") != nil {
-				summary = describe("Bedrock API key", variable: "AWS_BEARER_TOKEN_BEDROCK")
+				summary = describe("Bedrock API Key", variable: "AWS_BEARER_TOKEN_BEDROCK")
 			} else if plan.provider == .mantle {
 				summary = "None"
 				problem = "Bedrock Mantle needs AWS_BEARER_TOKEN_BEDROCK or \(plan.provider.skipAuthVariable!) with a gateway."
@@ -108,34 +108,31 @@ final class CredentialStore: @unchecked Sendable {
 			}
 		case .anthropicAWS:
 			if plan.skipAuth {
-				summary = settings.value("ANTHROPIC_AUTH_TOKEN") != nil ? describe("Gateway bearer token", variable: "ANTHROPIC_AUTH_TOKEN") : skipped()
+				summary = settings.value("ANTHROPIC_AUTH_TOKEN") != nil ? describe("Gateway Bearer Token", variable: "ANTHROPIC_AUTH_TOKEN") : skipped()
 			} else if settings.value("ANTHROPIC_AWS_API_KEY") != nil {
-				summary = describe("API key", variable: "ANTHROPIC_AWS_API_KEY")
+				summary = describe("API Key", variable: "ANTHROPIC_AWS_API_KEY")
 			} else {
 				summary = "None"
 				problem = "Claude Platform on AWS: only ANTHROPIC_AWS_API_KEY is supported (no SigV4)."
 			}
 		case .vertex:
 			if plan.skipAuth {
-				summary = settings.value("ANTHROPIC_AUTH_TOKEN") != nil ? describe("Gateway bearer token", variable: "ANTHROPIC_AUTH_TOKEN") : skipped()
+				summary = settings.value("ANTHROPIC_AUTH_TOKEN") != nil ? describe("Gateway Bearer Token", variable: "ANTHROPIC_AUTH_TOKEN") : skipped()
 			} else {
-				summary = "Google Cloud token"
+				summary = "Google Cloud Token"
 				details.append("gcloud application-default credentials")
 			}
 		case .foundry:
 			if plan.skipAuth {
 				summary = skipped()
 			} else if settings.value("ANTHROPIC_FOUNDRY_AUTH_TOKEN") != nil {
-				summary = describe("Bearer token", variable: "ANTHROPIC_FOUNDRY_AUTH_TOKEN")
+				summary = describe("Bearer Token", variable: "ANTHROPIC_FOUNDRY_AUTH_TOKEN")
 			} else if settings.value("ANTHROPIC_FOUNDRY_API_KEY") != nil {
-				summary = describe("API key", variable: "ANTHROPIC_FOUNDRY_API_KEY")
+				summary = describe("API Key", variable: "ANTHROPIC_FOUNDRY_API_KEY")
 			} else {
-				summary = "Azure token"
+				summary = "Azure Token"
 				details.append("az CLI credentials")
 			}
-		}
-		if !headers.isEmpty {
-			details.append("Custom headers: \(headers.map(\.0).joined(separator: ", ")) (ANTHROPIC_CUSTOM_HEADERS from \(settings.env["ANTHROPIC_CUSTOM_HEADERS"]?.source ?? "?"))")
 		}
 		self.summary = summary
 		self.details = details

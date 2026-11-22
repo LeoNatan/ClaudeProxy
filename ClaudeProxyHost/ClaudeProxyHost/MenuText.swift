@@ -4,11 +4,11 @@ extension NSMenuItem {
 	/// Longest line shown in a menu before wrapping, in characters.
 	static let maximumLineLength = 60
 
-	/// A disabled, informational item. Long text wraps onto several lines instead of widening the whole menu.
-	static func info(_ text: String) -> NSMenuItem {
+	/// A disabled, informational item. Long text wraps onto several lines instead of widening the whole menu, unless `wrapped` is false (submenus), where the menu grows as wide as it needs.
+	static func info(_ text: String, wrapped: Bool = true) -> NSMenuItem {
 		let item = NSMenuItem(title: text, action: nil, keyEquivalent: "")
 		item.isEnabled = false
-		let lines = wrap(text)
+		let lines = wrapped ? wrap(text) : text.components(separatedBy: "\n")
 		if lines.count > 1 {
 			item.attributedTitle = NSAttributedString(string: lines.joined(separator: "\n"), attributes: [
 				.font: NSFont.menuFont(ofSize: 0),

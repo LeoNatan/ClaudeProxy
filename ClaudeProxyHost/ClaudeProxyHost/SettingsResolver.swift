@@ -112,7 +112,6 @@ enum SettingsResolver {
 			apply(keys: winner.settings, source: winner.name, to: &resolved)
 		}
 
-		notes.append("Project, local and --settings scopes don't apply to the host.")
 		resolved.notes = notes
 		return resolved
 	}

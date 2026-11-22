@@ -220,10 +220,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 			menu.addItem(info("Provider: \(state.plan.provider.displayName)\(state.plan.region.map { " (\($0))" } ?? "")"))
 			menu.addItem(info("Upstream: \(state.plan.displayUpstream)"))
 			let credentials = NSMenuItem(title: "Credentials: \(state.credentials.summary)", action: nil, keyEquivalent: "")
-			if !state.credentials.details.isEmpty {
+			let headerNames = state.credentials.customHeaders.map(\.name)
+			if !state.credentials.details.isEmpty || !headerNames.isEmpty {
 				let details = NSMenu()
 				for detail in state.credentials.details {
-					details.addItem(info(detail))
+					details.addItem(info(detail, wrapped: false))
+				}
+				if !headerNames.isEmpty {
+					if !state.credentials.details.isEmpty {
+						details.addItem(.separator())
+					}
+					details.addItem(.sectionHeader(title: "Custom Headers"))
+					for name in headerNames {
+						details.addItem(info(name, wrapped: false))
+					}
+					details.addItem(info("ANTHROPIC_CUSTOM_HEADERS from \(state.settings.env["ANTHROPIC_CUSTOM_HEADERS"]?.source ?? "?")", wrapped: false))
 				}
 				credentials.submenu = details
 			} else {
@@ -246,10 +257,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
 			let profile = NSMenuItem(title: "Settings Sent to Clients", action: nil, keyEquivalent: "")
 			let profileMenu = NSMenu()
-			profileMenu.addItem(info("\(state.profile.baseURLVariable) = http://127.0.0.1:<client port>"))
+			profileMenu.addItem(info("\(state.profile.baseURLVariable) = http://127.0.0.1:<client port>", wrapped: false))
 			for name in state.profile.env.keys.sorted() {
 				let value = state.profile.env[name]!
-				profileMenu.addItem(info("\(name) = \(value.isEmpty ? "(unset)" : value)"))
+				profileMenu.addItem(info("\(name) = \(value.isEmpty ? "(unset)" : value)", wrapped: false))
 			}
 			profile.submenu = profileMenu
 			menu.addItem(profile)
@@ -275,26 +286,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 				continue
 			}
 			let shown = setting.value.isEmpty ? "(unset)" : CredentialStore.isSecret(name) ? "(set)" : setting.value
-			menu.addItem(info("\(name) = \(shown)\n\(setting.source)"))
+			menu.addItem(info("\(name) = \(shown)\n\(setting.source)", wrapped: false))
 			any = true
 		}
 		for name in HostState.displayedKeys {
 			guard let setting = settings.keys[name] else {
 				continue
 			}
-			menu.addItem(info("\(name) = \(setting.value)\n\(setting.source)"))
+			menu.addItem(info("\(name) = \(setting.value)\n\(setting.source)", wrapped: false))
 			any = true
 		}
 		if !any {
-			menu.addItem(info("No connection settings found; using api.anthropic.com defaults."))
+			menu.addItem(info("No connection settings found; using api.anthropic.com defaults.", wrapped: false))
 		}
 		menu.addItem(.separator())
-		menu.addItem(info("Config directory: \(SettingsResolver.displayPath(settings.configDirectory))"))
+		menu.addItem(info("Config directory: \(SettingsResolver.displayPath(settings.configDirectory))", wrapped: false))
 		return menu
 	}
 
-	private func info(_ title: String) -> NSMenuItem {
-		NSMenuItem.info(title)
+	private func info(_ title: String, wrapped: Bool = true) -> NSMenuItem {
+		NSMenuItem.info(title, wrapped: wrapped)
 	}
 
 	private func item(_ title: String, _ action: Selector, key: String = "") -> NSMenuItem {

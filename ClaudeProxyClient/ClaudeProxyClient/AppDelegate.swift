@@ -164,7 +164,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 		NSApp.activate()
 		let alert = NSAlert()
 		alert.messageText = "Use ClaudeProxy for Claude Code on this Mac?"
-		alert.informativeText = "Claude Code will connect through the host \(profile.map { "“\($0.name)”" } ?? "") using its configuration, with no login needed here. This changes \(SettingsInstaller.displayPath(installer.settingsURL)); Uninstall in the menu restores it."
+		alert.informativeText = "Claude Code will connect through this client with no login needed here."
 		alert.addButton(withTitle: "Install")
 		alert.addButton(withTitle: "Not Now")
 		alert.showsSuppressionButton = true
@@ -258,9 +258,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 			}
 		}
 
+		menu.addItem(.separator())
+		
 		let addresses = Self.localAddresses()
 		if !addresses.isEmpty {
-			menu.addItem(.sectionHeader(title: "Copy Address for the Host"))
+			menu.addItem(.sectionHeader(title: "Copy to Pasteboard"))
 			for address in addresses {
 				let copy = item("\(address.ip):\(networkPort)  (\(address.interface))", #selector(copyAddress(_:)))
 				copy.representedObject = "\(address.ip):\(networkPort)"

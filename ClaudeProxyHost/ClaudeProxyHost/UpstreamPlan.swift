@@ -14,7 +14,7 @@ enum Provider: String, Sendable, CaseIterable {
 
 	var displayName: String {
 		switch self {
-		case .anthropic: "Anthropic API / gateway"
+		case .anthropic: "Anthropic API / Gateway"
 		case .bedrock: "Amazon Bedrock"
 		case .vertex: "Google Vertex AI"
 		case .foundry: "Microsoft Foundry"
