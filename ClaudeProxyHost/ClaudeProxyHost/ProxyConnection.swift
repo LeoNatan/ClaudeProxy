@@ -61,8 +61,14 @@ final class ProxyConnection: @unchecked Sendable {
 	private var sentContinue = false
 	private var currentTask: URLSessionDataTask?
 	private var receivedData = false
+	/// Sent as soon as the connection is established, before anything else (the host's identity line).
+	var greeting: Data?
 	/// Called on the connection's queue when the connection is established.
 	var onReady: (@Sendable () -> Void)?
+	/// Called on the connection's queue when the client accepts the connection.
+	var onAccepted: (@Sendable () -> Void)?
+	/// Called on the connection's queue when the client turns the connection away because it uses another host.
+	var onRejected: (@Sendable () -> Void)?
 	/// Called on the connection's queue when the first request bytes arrive (the connection is no longer idle).
 	var onFirstData: (@Sendable () -> Void)?
 	var onClose: (@Sendable () -> Void)?
@@ -79,6 +85,9 @@ final class ProxyConnection: @unchecked Sendable {
 			}
 			switch state {
 			case .ready:
+				if let greeting {
+					connection.send(content: greeting, completion: .idempotent)
+				}
 				onReady?()
 			case .failed, .cancelled, .waiting:
 				// Waiting means the client is unreachable; the pool decides when to try again.
@@ -97,13 +106,23 @@ final class ProxyConnection: @unchecked Sendable {
 				return
 			}
 			if let data, !data.isEmpty {
-				if !receivedData {
-					receivedData = true
-					onFirstData?()
-					onFirstData = nil
-				}
 				buffer.append(data)
-				if !busy {
+				if !receivedData {
+					switch takeControlLines() {
+					case .needMore:
+						break
+					case .rejected:
+						close()
+						return
+					case .done where !buffer.isEmpty:
+						receivedData = true
+						onFirstData?()
+						onFirstData = nil
+					case .done:
+						break
+					}
+				}
+				if receivedData && !busy {
 					processBuffer()
 				}
 			}
@@ -116,6 +135,37 @@ final class ProxyConnection: @unchecked Sendable {
 				receive()
 			}
 		}
+	}
+
+	private enum ControlResult {
+		case needMore
+		case rejected
+		case done
+	}
+
+	/// Consumes the client's handshake lines, which come before any HTTP request on the connection.
+	private func takeControlLines() -> ControlResult {
+		let prefix = Data("CLAUDEPROXY-".utf8)
+		while !buffer.isEmpty {
+			let head = buffer.prefix(prefix.count)
+			guard prefix.starts(with: head) else {
+				return .done
+			}
+			guard let newline = buffer.firstIndex(of: 0x0A) else {
+				return buffer.count < 256 ? .needMore : .rejected
+			}
+			let line = String(decoding: buffer[buffer.startIndex...newline], as: UTF8.self)
+			buffer = Data(buffer[buffer.index(after: newline)...])
+			if line == ClaudeProxyProtocol.acceptLine {
+				onAccepted?()
+				onAccepted = nil
+			} else {
+				onRejected?()
+				onRejected = nil
+				return .rejected
+			}
+		}
+		return .done
 	}
 
 	func cancel() {

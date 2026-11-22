@@ -7,6 +7,8 @@ Two independent macOS menu bar apps (AppKit, Swift 6, macOS 15+, Apple silicon):
 
 The host connects **out** to clients, never the other way round, so it works on a managed Mac that can't advertise over Bonjour (`NoMulticastAdvertisements`) or accept incoming connections. Each client advertises `_claudeproxy-client._tcp` and listens on its network port (default 41822). The host browses for clients (or uses addresses added by hand) and keeps a pool of idle connections open to each. When Claude Code on the client connects to `127.0.0.1` (default 41821), the client pairs that connection with one idle host connection and splices the bytes; the host serves the HTTP on it exactly as before (credential swap, redaction, streaming, `/_claudeproxy/info` handshake).
 
+Each host connection starts with a one-line handshake (protocol v3): the host sends `CLAUDEPROXY-HOST <host id> <host name>`, and the client answers `CLAUDEPROXY-OK` or `CLAUDEPROXY-OTHER-HOST`, then HTTP follows. A client uses exactly one host (the first it sees, or the one picked in its menu) and turns other hosts away; a turned-away host retries every 10 s. The host ID is a UUID kept in the host's defaults. The host only connects to clients once its settings are loaded.
+
 Each folder has its own `.xcodeproj` (folder-synchronized groups). `Constants.swift`, `ProcessRunner.swift`, `MenuText.swift` and `Updater.swift` exist in both apps as copies: change them in both.
 
 Both apps update themselves with [Sparkle](https://sparkle-project.org) (Swift package). Each app's `SUFeedURL` points at an appcast attached to the latest GitHub release: `https://github.com/LeoNatan/ClaudeProxy/releases/latest/download/appcast-host.xml` and `…/appcast-client.xml`. Updates are not EdDSA-signed (no `SUPublicEDKey`): Sparkle accepts them because the update and the installed app carry the same Developer ID signature. Sparkle logs that this mode is deprecated; if a future Sparkle drops it, add a key with `generate_keys`.
@@ -71,11 +73,12 @@ for APP in ClaudeProxyHost ClaudeProxyClient; do
 	mkdir "$STAGE/$APP-feed"
 	cp "$STAGE/$APP-$VERSION.zip" "$STAGE/$APP-feed/"
 	cp release-notes.md "$STAGE/$APP-feed/$APP-$VERSION.md"   # user-visible changes for this release
-	"$GENERATE_APPCAST" --download-url-prefix "https://github.com/LeoNatan/ClaudeProxy/releases/download/v$VERSION/" -o "$STAGE/$FEED" "$STAGE/$APP-feed"
+	"$GENERATE_APPCAST" --embed-release-notes --download-url-prefix "https://github.com/LeoNatan/ClaudeProxy/releases/download/v$VERSION/" -o "$STAGE/$FEED" "$STAGE/$APP-feed"
 done
 ```
 
 - Pass `-o` an absolute path: a relative one is written to the current directory (the repo).
+- Keep `--embed-release-notes`: without it the appcast links to a separate `.md` file that isn't uploaded.
 - "Private key for account ed25519 not found in the Keychain" is expected (no EdDSA key, see above).
 - Each appcast holds only the new version; that's all Sparkle needs.
 

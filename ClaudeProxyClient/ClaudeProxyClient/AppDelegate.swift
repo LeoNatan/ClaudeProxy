@@ -245,6 +245,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 			menu.addItem(info("⚠︎ Local proxy: \(message)"))
 		}
 
+		let hosts = pool.knownHosts
+		if hosts.count > 1 || hosts.contains(where: { !$0.isSelected }) {
+			menu.addItem(.separator())
+			menu.addItem(info("Hosts"))
+			for host in hosts {
+				let suffix = host.isSelected ? (hasHost ? "" : " — offline") : ""
+				let entry = item(host.name + suffix, #selector(selectHost(_:)))
+				entry.representedObject = host.id
+				entry.state = host.isSelected ? .on : .off
+				entry.indentationLevel = 1
+				menu.addItem(entry)
+			}
+		}
+
 		let addresses = Self.localAddresses()
 		if !addresses.isEmpty {
 			menu.addItem(info("Copy Address for the Host’s “Add Client by Address”:"))
@@ -324,6 +338,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 	}
 
 	// MARK: Actions
+
+	@objc private func selectHost(_ sender: NSMenuItem) {
+		guard let id = sender.representedObject as? String, sender.state != .on else {
+			return
+		}
+		pool.select(hostID: id)
+		// The new host's settings replace the old one's once it connects (within about 10 s).
+		profile = nil
+		profileError = nil
+		updateIcon()
+	}
 
 	@objc private func copyAddress(_ sender: NSMenuItem) {
 		guard let value = sender.representedObject as? String else {

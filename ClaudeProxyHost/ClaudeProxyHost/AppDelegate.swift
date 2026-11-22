@@ -11,9 +11,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
 	private static let serviceName = Host.current().localizedName ?? "ClaudeProxy Host"
 
+	/// Stable identity sent to clients, so a client can tell its host apart from others on the network.
+	private static let hostID: String = {
+		if let stored = UserDefaults.standard.string(forKey: "hostID") {
+			return stored
+		}
+		let id = UUID().uuidString
+		UserDefaults.standard.set(id, forKey: "hostID")
+		return id
+	}()
+
 	private var statusItem: NSStatusItem!
 	private let updater = Updater()
-	private let links = ClientLinkManager()
+	private let links = ClientLinkManager(hostID: AppDelegate.hostID, hostName: AppDelegate.serviceName)
 	private let browser = ClientBrowser()
 	private var state: HostState?
 	private var fingerprint = ""
@@ -177,6 +187,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 			case .connected: status = "connected"
 			case .connecting: status = "connecting…"
 			case .unreachable: status = "unreachable"
+			case .otherHost: status = "using another host"
 			case nil: status = "not served"
 			}
 			let client = item("\(title) — \(status)", #selector(toggleClient(_:)))

@@ -23,6 +23,9 @@ final class HostConnection: @unchecked Sendable {
 	}
 
 	let connection: NWConnection
+	/// From the host's greeting line.
+	private(set) var hostID = ""
+	private(set) var hostName = ""
 	private var reading = false
 	private var buffered: Event?
 	private var handler: ((Event) -> Void)?
@@ -57,6 +60,68 @@ final class HostConnection: @unchecked Sendable {
 		}
 	}
 
+	/// Reads the host's greeting line ("CLAUDEPROXY-HOST <id> <name>"). Bytes after it are kept for the next `read`.
+	/// Runs on `queue`, the connection's queue.
+	func readGreeting(timeout: TimeInterval, queue: DispatchQueue, completion: @escaping (Bool) -> Void) {
+		final class Attempt: @unchecked Sendable {
+			var line = Data()
+			var completion: ((Bool) -> Void)?
+
+			init(completion: @escaping (Bool) -> Void) {
+				self.completion = completion
+			}
+
+			func finish(_ success: Bool) {
+				completion?(success)
+				completion = nil
+			}
+		}
+		let attempt = Attempt(completion: completion)
+
+		func next() {
+			read { [weak self] event in
+				guard let self, attempt.completion != nil else {
+					return
+				}
+				if let data = event.data {
+					attempt.line.append(data)
+				}
+				let line = attempt.line
+				guard let newline = line.firstIndex(of: 0x0A) else {
+					if event.isComplete || event.failed || line.count > 512 {
+						attempt.finish(false)
+					} else {
+						next()
+					}
+					return
+				}
+				let rest = Data(line[line.index(after: newline)...])
+				if !rest.isEmpty || event.isComplete || event.failed {
+					buffered = Event(data: rest, isComplete: event.isComplete, failed: event.failed)
+				}
+				let text = String(decoding: line[line.startIndex..<newline], as: UTF8.self)
+				let prefix = ClaudeProxyProtocol.hostGreetingPrefix
+				let fields = text.hasPrefix(prefix) ? text.dropFirst(prefix.count).split(separator: " ", maxSplits: 1).map(String.init) : []
+				guard fields.count == 2 else {
+					attempt.finish(false)
+					return
+				}
+				hostID = fields[0]
+				hostName = fields[1]
+				attempt.finish(true)
+			}
+		}
+		next()
+		// A host from before protocol v3 sends no greeting.
+		queue.asyncAfter(deadline: .now() + timeout) {
+			attempt.finish(false)
+		}
+	}
+
+	func send(_ line: String, completion: @escaping @Sendable () -> Void = {}) {
+		connection.send(content: Data(line.utf8), completion: .contentProcessed { _ in completion() })
+	}
+
 	/// Stops delivering to the current handler; a read already in flight is kept for the next one.
 	func detach() {
 		handler = nil
@@ -85,6 +150,9 @@ final class HostConnectionPool: @unchecked Sendable {
 	private var port: UInt16 = 0
 	private var generation = 0
 	private var idle: [HostConnection] = []
+	/// Hosts that have connected recently, by ID. The client serves Claude Code through one of them.
+	private var hosts: [String: (name: String, lastSeen: Date)] = [:]
+	private static let selectedHostKey = "selectedHostID"
 	/// Accepted connections not yet established; holds them until they join `idle`.
 	private var connecting: [ObjectIdentifier: HostConnection] = [:]
 	private var inUse = 0
@@ -97,9 +165,49 @@ final class HostConnectionPool: @unchecked Sendable {
 		self.serviceName = serviceName
 	}
 
-	/// Whether a host currently keeps connections open to this client.
+	struct KnownHost: Sendable {
+		let id: String
+		let name: String
+		let isSelected: Bool
+	}
+
+	/// Whether the selected host currently keeps connections open to this client.
 	var hasHost: Bool {
 		queue.sync { !idle.isEmpty || inUse > 0 }
+	}
+
+	/// Hosts seen in the last minute, plus the selected one.
+	var knownHosts: [KnownHost] {
+		queue.sync {
+			let selected = selectedHostID
+			return hosts
+				.filter { $0.key == selected || Date().timeIntervalSince($0.value.lastSeen) < 60 }
+				.map { KnownHost(id: $0.key, name: $0.value.name, isSelected: $0.key == selected) }
+				.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+		}
+	}
+
+	private var selectedHostID: String? {
+		get { UserDefaults.standard.string(forKey: Self.selectedHostKey) }
+		set { UserDefaults.standard.set(newValue, forKey: Self.selectedHostKey) }
+	}
+
+	/// Switches to another host: the current host's idle connections are turned away, and the new host's are
+	/// accepted from now on (it retries within about 10 s).
+	func select(hostID: String) {
+		queue.async { [self] in
+			guard hostID != selectedHostID else {
+				return
+			}
+			selectedHostID = hostID
+			for connection in idle {
+				connection.send(ClaudeProxyProtocol.otherHostLine) {
+					connection.cancel()
+				}
+			}
+			idle.removeAll()
+			onChange?()
+		}
 	}
 
 	func start(port: UInt16) {
@@ -146,6 +254,23 @@ final class HostConnectionPool: @unchecked Sendable {
 		inUse += 1
 		onChange?()
 		return connection
+	}
+
+	/// Accepts connections from the selected host (the first host seen becomes the selected one) and turns others away.
+	private func admit(_ connection: HostConnection) {
+		hosts[connection.hostID] = (connection.hostName, Date())
+		if selectedHostID == nil {
+			selectedHostID = connection.hostID
+		}
+		guard connection.hostID == selectedHostID else {
+			connection.send(ClaudeProxyProtocol.otherHostLine) {
+				connection.cancel()
+			}
+			onChange?()
+			return
+		}
+		connection.send(ClaudeProxyProtocol.acceptLine)
+		addIdle(connection)
 	}
 
 	private func addIdle(_ connection: HostConnection) {
@@ -247,8 +372,15 @@ final class HostConnectionPool: @unchecked Sendable {
 			}
 			switch state {
 			case .ready:
-				if connecting.removeValue(forKey: id) != nil {
-					addIdle(connection)
+				connection.readGreeting(timeout: 5, queue: queue) { [weak self] valid in
+					guard let self, connecting.removeValue(forKey: id) != nil else {
+						return
+					}
+					guard valid else {
+						connection.cancel()
+						return
+					}
+					admit(connection)
 				}
 			case .failed, .cancelled:
 				// Keep-alive giving up, or the connection being torn down.

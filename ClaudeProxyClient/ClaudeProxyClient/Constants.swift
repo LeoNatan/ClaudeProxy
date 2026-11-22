@@ -4,7 +4,7 @@ import Foundation
 enum ClaudeProxyProtocol {
 	/// Clients advertise this; the host browses for it and connects out to each client.
 	static let clientServiceType = "_claudeproxy-client._tcp"
-	static let version = 2
+	static let version = 3
 	static let infoPath = "/_claudeproxy/info"
 	// Ports stay below macOS's ephemeral range (49152–65535), where outgoing connections can already hold them.
 
@@ -14,6 +14,14 @@ enum ClaudeProxyProtocol {
 	static let defaultClientNetworkPort: UInt16 = 41822
 	/// Sent by clients in place of a real credential; the host always replaces it.
 	static let placeholderToken = "claudeproxy-placeholder"
+
+	// Connection handshake. Each connection the host opens starts with the host's identity line; the client answers
+	// with one line, accepting the connection or turning it away because it uses another host. HTTP follows.
+
+	/// "CLAUDEPROXY-HOST <host id> <host name>\n", sent by the host as soon as a connection is established.
+	static let hostGreetingPrefix = "CLAUDEPROXY-HOST "
+	static let acceptLine = "CLAUDEPROXY-OK\n"
+	static let otherHostLine = "CLAUDEPROXY-OTHER-HOST\n"
 }
 
 /// Handshake payload served at `ClaudeProxyProtocol.infoPath`. Never contains secrets.

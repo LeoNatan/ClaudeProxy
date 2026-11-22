@@ -8,11 +8,15 @@ final class ClientLink: @unchecked Sendable {
 	enum Status: Sendable, Equatable {
 		case connecting
 		case connected
+		/// The client turned the connections away: it uses another host.
+		case otherHost
 		case unreachable
 	}
 
 	private final class Entry: @unchecked Sendable {
 		var ready = false
+		var accepted = false
+		var rejected = false
 		var active = false
 	}
 
@@ -20,22 +24,24 @@ final class ClientLink: @unchecked Sendable {
 	private static let idleTarget = 4
 	private static let maxConnections = 64
 	private static let connectTimeout: TimeInterval = 10
+	/// How often to ask again after a client turned this host away (it may switch back).
+	private static let otherHostRetry: TimeInterval = 10
 
 	let endpoint: NWEndpoint
 	private let queue: DispatchQueue
+	private let greeting: Data
 	private let stateProvider: @Sendable () -> HostState?
-	private var connections: [ObjectIdentifier: ProxyConnection] = [:]
-	private var idle = 0
-	private var active = 0
-	private var ready = 0
+	private var entries: [ObjectIdentifier: (connection: ProxyConnection, entry: Entry)] = [:]
 	private var failures = 0
+	private var turnedAway = false
 	private var retryScheduled = false
 	private var stopped = false
 	private(set) var status: Status = .connecting
 	var onStatusChange: (@Sendable () -> Void)?
 
-	init(endpoint: NWEndpoint, queue: DispatchQueue, stateProvider: @escaping @Sendable () -> HostState?) {
+	init(endpoint: NWEndpoint, greeting: Data, queue: DispatchQueue, stateProvider: @escaping @Sendable () -> HostState?) {
 		self.endpoint = endpoint
+		self.greeting = greeting
 		self.queue = queue
 		self.stateProvider = stateProvider
 	}
@@ -49,7 +55,7 @@ final class ClientLink: @unchecked Sendable {
 	func stop() {
 		queue.async { [self] in
 			stopped = true
-			for connection in connections.values {
+			for (connection, _) in entries.values {
 				connection.cancel()
 			}
 		}
@@ -57,17 +63,20 @@ final class ClientLink: @unchecked Sendable {
 
 	// MARK: Pool (on `queue`)
 
+	private var idleCount: Int {
+		entries.values.count { !$0.entry.active }
+	}
+
 	private func replenish() {
 		guard !stopped, !retryScheduled else {
 			return
 		}
-		while idle < Self.idleTarget && idle + active < Self.maxConnections {
+		while idleCount < Self.idleTarget && entries.count < Self.maxConnections {
 			open()
 		}
 	}
 
 	private func open() {
-		idle += 1
 		// Same keep-alive as the client: a client that vanishes is noticed after about 25 s.
 		let tcp = NWProtocolTCP.Options()
 		tcp.enableKeepalive = true
@@ -75,19 +84,32 @@ final class ClientLink: @unchecked Sendable {
 		tcp.keepaliveInterval = 5
 		tcp.keepaliveCount = 3
 		let connection = ProxyConnection(connection: NWConnection(to: endpoint, using: NWParameters(tls: nil, tcp: tcp)), stateProvider: stateProvider)
+		connection.greeting = greeting
 		let entry = Entry()
 		let id = ObjectIdentifier(connection)
 		connection.onReady = { [weak self] in
+			self?.queue.async {
+				entry.ready = true
+			}
+		}
+		connection.onAccepted = { [weak self] in
 			guard let self else {
 				return
 			}
 			queue.async {
-				guard !entry.ready else {
-					return
-				}
-				entry.ready = true
-				self.ready += 1
+				entry.accepted = true
 				self.failures = 0
+				self.turnedAway = false
+				self.updateStatus()
+			}
+		}
+		connection.onRejected = { [weak self] in
+			guard let self else {
+				return
+			}
+			queue.async {
+				entry.rejected = true
+				self.turnedAway = true
 				self.updateStatus()
 			}
 		}
@@ -97,11 +119,6 @@ final class ClientLink: @unchecked Sendable {
 			}
 			queue.async {
 				entry.active = true
-				self.idle -= 1
-				self.active += 1
-				if entry.ready {
-					self.ready -= 1
-				}
 				self.replenish()
 			}
 		}
@@ -110,43 +127,36 @@ final class ClientLink: @unchecked Sendable {
 				return
 			}
 			queue.async {
-				guard self.connections.removeValue(forKey: id) != nil else {
+				guard self.entries.removeValue(forKey: id) != nil else {
 					return
 				}
-				if entry.active {
-					self.active -= 1
-				} else {
-					self.idle -= 1
-					if entry.ready {
-						self.ready -= 1
-					}
-				}
-				if entry.ready {
+				if entry.rejected {
+					self.scheduleRetry(after: Self.otherHostRetry)
+				} else if entry.accepted {
 					self.replenish()
 				} else {
 					self.failures += 1
-					self.scheduleRetry()
+					self.scheduleRetry(after: self.failures > 3 * Self.idleTarget ? 30 : 5)
 				}
 				self.updateStatus()
 			}
 		}
-		connections[id] = connection
+		entries[id] = (connection, entry)
 		connection.start()
 
 		// A Bonjour endpoint that never resolves, or a client that never answers, would otherwise hold a pool slot forever.
 		queue.asyncAfter(deadline: .now() + Self.connectTimeout) { [weak connection] in
-			if !entry.ready {
+			if !entry.accepted && !entry.rejected {
 				connection?.cancel()
 			}
 		}
 	}
 
-	private func scheduleRetry() {
+	private func scheduleRetry(after delay: TimeInterval) {
 		guard !retryScheduled, !stopped else {
 			return
 		}
 		retryScheduled = true
-		let delay: TimeInterval = failures > 3 * Self.idleTarget ? 30 : 5
 		queue.asyncAfter(deadline: .now() + delay) { [weak self] in
 			guard let self else {
 				return
@@ -157,8 +167,8 @@ final class ClientLink: @unchecked Sendable {
 	}
 
 	private func updateStatus() {
-		// `ready` counts idle connections that reached the client; `active` ones are carrying requests.
-		let newStatus: Status = ready > 0 || active > 0 ? .connected : failures > 0 ? .unreachable : .connecting
+		let serving = entries.values.contains { $0.entry.accepted || $0.entry.active }
+		let newStatus: Status = serving ? .connected : turnedAway ? .otherHost : failures > 0 ? .unreachable : .connecting
 		if newStatus != status {
 			status = newStatus
 			onStatusChange?()
@@ -172,7 +182,15 @@ final class ClientLinkManager: @unchecked Sendable {
 	private let lock = NSLock()
 	private var state: HostState?
 	private var links: [String: ClientLink] = [:]
+	/// Clients to serve once settings are loaded: connecting earlier would only answer "still loading".
+	private var targets: [String: NWEndpoint] = [:]
+	private let greeting: Data
 	var onChange: (@Sendable () -> Void)?
+
+	/// `hostID` identifies this host to clients across restarts; `hostName` is what clients show.
+	init(hostID: String, hostName: String) {
+		greeting = Data("\(ClaudeProxyProtocol.hostGreetingPrefix)\(hostID) \(hostName)\n".utf8)
+	}
 
 	var currentState: HostState? {
 		lock.lock()
@@ -189,27 +207,40 @@ final class ClientLinkManager: @unchecked Sendable {
 		if old !== newState {
 			old?.forwarder.retire()
 		}
+		if old == nil {
+			queue.async { [self] in
+				applyTargets()
+			}
+		}
 	}
 
 	/// Serves exactly these clients (keyed by a stable identifier), keeping existing links that are still wanted.
 	func setClients(_ targets: [String: NWEndpoint]) {
 		queue.async { [self] in
-			for (key, link) in links where targets[key] != link.endpoint {
-				link.stop()
-				links[key] = nil
-			}
-			for (key, endpoint) in targets where links[key] == nil {
-				let link = ClientLink(endpoint: endpoint, queue: queue) { [weak self] in
-					self?.currentState
-				}
-				link.onStatusChange = { [weak self] in
-					self?.onChange?()
-				}
-				links[key] = link
-				link.start()
-			}
-			onChange?()
+			self.targets = targets
+			applyTargets()
 		}
+	}
+
+	private func applyTargets() {
+		guard currentState != nil else {
+			return
+		}
+		for (key, link) in links where targets[key] != link.endpoint {
+			link.stop()
+			links[key] = nil
+		}
+		for (key, endpoint) in targets where links[key] == nil {
+			let link = ClientLink(endpoint: endpoint, greeting: greeting, queue: queue) { [weak self] in
+				self?.currentState
+			}
+			link.onStatusChange = { [weak self] in
+				self?.onChange?()
+			}
+			links[key] = link
+			link.start()
+		}
+		onChange?()
 	}
 
 	func statuses() -> [String: ClientLink.Status] {
