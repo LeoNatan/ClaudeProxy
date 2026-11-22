@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 	private let browser = ServerBrowser()
 	private let forwarder = LocalForwarder()
 	private let installer = SettingsInstaller()
+	private let scanner = NetworkScanner()
 	private var forwarderStatus: LocalForwarder.Status = .stopped
 	private var profile: ClientProfile?
 	private var profileError: String?
@@ -57,6 +58,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 	}
 
 	func applicationDidFinishLaunching(_ notification: Notification) {
+		installEditMenu()
 		statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 		let menu = NSMenu()
 		menu.delegate = self
@@ -78,6 +80,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 		}
 		browser.start()
 		refreshTarget()
+
+		scanner.onChange = { [weak self] in
+			self?.scanChanged()
+		}
+		// Servers that can't advertise over Bonjour are still found by asking the subnet directly.
+		DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+			MainActor.assumeIsolated {
+				guard let self, self.browser.servers.isEmpty, !self.useManual || self.profile == nil else {
+					return
+				}
+				self.startScan()
+			}
+		}
 
 		pollTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
 			MainActor.assumeIsolated {
@@ -119,6 +134,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 		if previous != forwarder.target || (selectedServer?.profileVersion).map({ $0 != profile?.pv }) ?? false {
 			fetchProfile()
 		}
+	}
+
+	private func startScan() {
+		var ports = [ClaudeProxyProtocol.defaultServerPort]
+		if !ports.contains(manualPort) {
+			ports.append(manualPort)
+		}
+		scanner.scan(ports: ports)
+	}
+
+	private func scanChanged() {
+		// Like Bonjour: with nothing chosen yet, a single server found is the obvious pick.
+		if !scanner.isScanning, browser.servers.isEmpty, selectedServerName == nil, !useManual, scanner.results.count == 1 {
+			let result = scanner.results[0]
+			manualHost = result.host
+			manualPort = result.port
+			useManual = true
+			refreshTarget()
+		}
+	}
+
+	private var scannedServers: [NetworkScanner.Result] {
+		let bonjourNames = Set(browser.servers.map(\.name))
+		return scanner.results.filter { !bonjourNames.contains($0.name) }
 	}
 
 	private func refreshTarget(fetch: Bool = true) {
@@ -193,6 +232,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 		statusItem.button?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: "ClaudeProxy Client")
 	}
 
+	/// Menu bar apps get no main menu, and without an Edit menu text fields don't receive ⌘X/⌘C/⌘V/⌘A/⌘Z.
+	/// The menu is never shown; it only has to exist for key equivalents to reach the alert's text fields.
+	private func installEditMenu() {
+		let edit = NSMenu(title: "Edit")
+		edit.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+		let redo = edit.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "z")
+		redo.keyEquivalentModifierMask = [.command, .shift]
+		edit.addItem(.separator())
+		edit.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+		edit.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+		edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+		edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+		let editItem = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")
+		editItem.submenu = edit
+		let main = NSMenu()
+		main.addItem(NSMenuItem(title: "", action: nil, keyEquivalent: ""))
+		main.addItem(editItem)
+		NSApp.mainMenu = main
+	}
+
 	// MARK: Menu
 
 	func menuNeedsUpdate(_ menu: NSMenu) {
@@ -221,8 +280,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
 		menu.addItem(.separator())
 		menu.addItem(info("Servers on This Network"))
-		if browser.servers.isEmpty {
-			menu.addItem(info("    None found"))
+		if browser.servers.isEmpty && scannedServers.isEmpty {
+			menu.addItem(info(scanner.isScanning ? "    Searching…" : "    None found"))
 		}
 		for server in browser.servers {
 			let item = item(server.name, #selector(selectServer(_:)))
@@ -231,8 +290,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 			item.indentationLevel = 1
 			menu.addItem(item)
 		}
-		let manual = item(manualHost.isEmpty ? "Manual Server…" : "Manual: \(manualHost):\(manualPort)…", #selector(configureManualServer))
-		manual.state = useManual ? .on : .off
+		var manualMatchesScan = false
+		for server in scannedServers {
+			let item = item("\(server.name) (\(server.host))", #selector(selectScannedServer(_:)))
+			item.representedObject = "\(server.host):\(server.port)"
+			let selected = useManual && manualHost == server.host && manualPort == server.port
+			manualMatchesScan = manualMatchesScan || selected
+			item.state = selected ? .on : .off
+			item.indentationLevel = 1
+			menu.addItem(item)
+		}
+		let scan = item(scanner.isScanning ? "Scanning Network…" : "Scan Network", #selector(scanNetwork))
+		scan.isEnabled = !scanner.isScanning
+		scan.indentationLevel = 1
+		menu.addItem(scan)
+		let manual = item(manualHost.isEmpty || manualMatchesScan ? "Manual Server…" : "Manual: \(manualHost):\(manualPort)…", #selector(configureManualServer))
+		manual.state = useManual && !manualMatchesScan ? .on : .off
 		manual.indentationLevel = 1
 		menu.addItem(manual)
 
@@ -291,11 +364,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 		refreshTarget()
 	}
 
+	@objc private func selectScannedServer(_ sender: NSMenuItem) {
+		guard let value = sender.representedObject as? String, let colon = value.lastIndex(of: ":"),
+			  let port = UInt16(value[value.index(after: colon)...]) else {
+			return
+		}
+		manualHost = String(value[..<colon])
+		manualPort = port
+		useManual = true
+		profile = nil
+		profileError = nil
+		refreshTarget()
+	}
+
+	@objc private func scanNetwork() {
+		startScan()
+	}
+
 	@objc private func configureManualServer() {
 		NSApp.activate()
 		let alert = NSAlert()
 		alert.messageText = "Manual Server"
-		alert.informativeText = "Host name or IP address and port of a ClaudeProxy Server."
+		alert.informativeText = "IP address (or host name) and port of a ClaudeProxy Server. The server menu has a Copy item for its address."
 		let host = NSTextField(frame: NSRect(x: 0, y: 30, width: 260, height: 24))
 		host.placeholderString = "192.168.1.10"
 		host.stringValue = manualHost
@@ -314,8 +404,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 		alert.window.initialFirstResponder = host
 		switch alert.runModal() {
 		case .alertFirstButtonReturn:
-			let hostValue = host.stringValue.trimmingCharacters(in: .whitespaces)
-			guard !hostValue.isEmpty, let portValue = UInt16(port.stringValue.trimmingCharacters(in: .whitespaces)), portValue > 0 else {
+			var hostValue = host.stringValue.trimmingCharacters(in: .whitespaces)
+			var portString = port.stringValue.trimmingCharacters(in: .whitespaces)
+			// Accept a pasted "address:port" in the host field (IPv4 or host name; IPv6 has its own colons).
+			if let colon = hostValue.lastIndex(of: ":"), hostValue.filter({ $0 == ":" }).count == 1, UInt16(hostValue[hostValue.index(after: colon)...]) != nil {
+				portString = String(hostValue[hostValue.index(after: colon)...])
+				hostValue = String(hostValue[..<colon])
+			}
+			guard !hostValue.isEmpty, let portValue = UInt16(portString), portValue > 0 else {
 				NSSound.beep()
 				return
 			}

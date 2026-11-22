@@ -67,7 +67,7 @@ enum InfoClient {
 		let errorDescription: String?
 	}
 
-	static func fetch(_ endpoint: NWEndpoint, completion: @escaping @MainActor (Result<ClientProfile, Error>) -> Void) {
+	static func fetch(_ endpoint: NWEndpoint, timeout: TimeInterval = 8, completion: @escaping @MainActor (Result<ClientProfile, Error>) -> Void) {
 		final class State: @unchecked Sendable {
 			var data = Data()
 			var finished = false
@@ -123,7 +123,7 @@ enum InfoClient {
 			}
 		}
 		connection.start(queue: queue)
-		queue.asyncAfter(deadline: .now() + 8) {
+		queue.asyncAfter(deadline: .now() + timeout) {
 			finish(.failure(InfoError(errorDescription: "Server did not respond.")))
 		}
 	}

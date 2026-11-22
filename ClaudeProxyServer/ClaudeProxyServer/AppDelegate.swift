@@ -24,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 	}
 
 	func applicationDidFinishLaunching(_ notification: Notification) {
+		installEditMenu()
 		statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 		statusItem.button?.image = NSImage(systemSymbolName: "server.rack", accessibilityDescription: "ClaudeProxy Server")
 		let menu = NSMenu()
@@ -106,6 +107,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 		statusItem.button?.image = NSImage(systemSymbolName: healthy ? "server.rack" : "exclamationmark.triangle", accessibilityDescription: "ClaudeProxy Server")
 	}
 
+	/// Menu bar apps get no main menu, and without an Edit menu text fields don't receive ⌘X/⌘C/⌘V/⌘A/⌘Z.
+	/// The menu is never shown; it only has to exist for key equivalents to reach the alert's text fields.
+	private func installEditMenu() {
+		let edit = NSMenu(title: "Edit")
+		edit.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+		let redo = edit.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "z")
+		redo.keyEquivalentModifierMask = [.command, .shift]
+		edit.addItem(.separator())
+		edit.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+		edit.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+		edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+		edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+		let editItem = NSMenuItem(title: "Edit", action: nil, keyEquivalent: "")
+		editItem.submenu = edit
+		let main = NSMenu()
+		main.addItem(NSMenuItem(title: "", action: nil, keyEquivalent: ""))
+		main.addItem(editItem)
+		NSApp.mainMenu = main
+	}
+
 	// MARK: Menu
 
 	func menuNeedsUpdate(_ menu: NSMenu) {
@@ -123,6 +144,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 			menu.addItem(info("ⓘ Allow ClaudeProxy Server in System Settings › Privacy & Security › Local Network"))
 		case let .failed(message):
 			menu.addItem(info("⚠︎ Listener failed: \(message)"))
+		}
+
+		let addresses = Self.localAddresses()
+		if !addresses.isEmpty {
+			menu.addItem(info("Copy Address for a Client’s Manual Server:"))
+			for address in addresses {
+				let copy = item("\(address.ip):\(port)  (\(address.interface))", #selector(copyAddress(_:)))
+				copy.representedObject = "\(address.ip):\(port)"
+				copy.indentationLevel = 1
+				menu.addItem(copy)
+			}
 		}
 
 		if let state {
@@ -227,6 +259,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 		}
 		port = newPort
 		server.start(port: newPort)
+	}
+
+	@objc private func copyAddress(_ sender: NSMenuItem) {
+		guard let value = sender.representedObject as? String else {
+			return
+		}
+		NSPasteboard.general.clearContents()
+		NSPasteboard.general.setString(value, forType: .string)
+	}
+
+	/// IPv4 addresses of active LAN interfaces, the ones a client on the same network can reach.
+	private static func localAddresses() -> [(ip: String, interface: String)] {
+		var result: [(String, String)] = []
+		var interfaces: UnsafeMutablePointer<ifaddrs>?
+		guard getifaddrs(&interfaces) == 0, let first = interfaces else {
+			return []
+		}
+		defer { freeifaddrs(interfaces) }
+		for pointer in sequence(first: first, next: { $0.pointee.ifa_next }) {
+			let entry = pointer.pointee
+			let flags = Int32(entry.ifa_flags)
+			guard let address = entry.ifa_addr, address.pointee.sa_family == UInt8(AF_INET),
+				  flags & IFF_UP != 0, flags & IFF_RUNNING != 0, flags & IFF_BROADCAST != 0, flags & IFF_LOOPBACK == 0 else {
+				continue
+			}
+			var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+			guard getnameinfo(address, socklen_t(address.pointee.sa_len), &host, socklen_t(host.count), nil, 0, NI_NUMERICHOST) == 0 else {
+				continue
+			}
+			let ip = String(decoding: host.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
+			result.append((ip, String(validatingCString: entry.ifa_name) ?? "?"))
+		}
+		return result
 	}
 
 	@objc private func reloadSettings() {
