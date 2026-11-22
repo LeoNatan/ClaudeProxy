@@ -7,6 +7,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 	private enum Defaults {
 		static let localPort = "localPort"
 		static let networkPort = "networkPort"
+		/// Set when the user uninstalls from the menu or ticks "Don't ask again"; stops the automatic install offer
+		/// until they install from the menu.
+		static let skipInstallOffer = "skipInstallOffer"
 	}
 
 	private static let serviceName = Host.current().localizedName ?? "ClaudeProxy Client"
@@ -21,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 	private var profileError: String?
 	private var installError: String?
 	private var fetching = false
+	private var offeredInstall = false
 	private var pollTimer: Timer?
 
 	private var localPort: UInt16 {
@@ -116,6 +120,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 				self.profile = profile
 				profileError = nil
 				syncInstallation()
+				offerInstallIfNeeded()
 			case let .failure(error):
 				profileError = error.localizedDescription
 			}
@@ -143,6 +148,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 		} catch {
 			installError = error.localizedDescription
 		}
+	}
+
+	/// The client is meant to be the way Claude Code works on this Mac, so it offers to install as soon as a host
+	/// provides the settings: once per launch, and never again after the user uninstalls from the menu or opts out.
+	private func offerInstallIfNeeded() {
+		guard !offeredInstall, !installer.isInstalled, !UserDefaults.standard.bool(forKey: Defaults.skipInstallOffer) else {
+			return
+		}
+		offeredInstall = true
+		NSApp.activate()
+		let alert = NSAlert()
+		alert.messageText = "Use ClaudeProxy for Claude Code on this Mac?"
+		alert.informativeText = "Claude Code will connect through the host \(profile.map { "“\($0.name)”" } ?? "") using its configuration, with no login needed here. This changes \(SettingsInstaller.displayPath(installer.settingsURL)); Uninstall in the menu restores it."
+		alert.addButton(withTitle: "Install")
+		alert.addButton(withTitle: "Not Now")
+		alert.showsSuppressionButton = true
+		alert.suppressionButton?.title = "Don’t ask again"
+		guard alert.runModal() == .alertFirstButtonReturn else {
+			if alert.suppressionButton?.state == .on {
+				UserDefaults.standard.set(true, forKey: Defaults.skipInstallOffer)
+			}
+			return
+		}
+		install()
 	}
 
 	private func updateIcon() {
@@ -305,6 +334,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 		do {
 			try installer.install(env: desiredEnv)
 			installError = nil
+			UserDefaults.standard.removeObject(forKey: Defaults.skipInstallOffer)
 		} catch {
 			installError = error.localizedDescription
 			NSApp.activate()
@@ -317,6 +347,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 		do {
 			try installer.uninstall()
 			installError = nil
+			UserDefaults.standard.set(true, forKey: Defaults.skipInstallOffer)
 		} catch {
 			installError = error.localizedDescription
 			NSApp.activate()
