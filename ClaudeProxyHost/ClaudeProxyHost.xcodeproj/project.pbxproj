@@ -7,26 +7,26 @@
 	objects = {
 
 /* Begin PBXFileReference section */
-		3B11D82F5BBDEC0C4F2F2DC2 /* ClaudeProxyServer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ClaudeProxyServer.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		3B11D82F5BBDEC0C4F2F2DC2 /* ClaudeProxyHost.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ClaudeProxyHost.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		903A6655989160A09D908DC9 /* Exceptions for "ClaudeProxyServer" folder in "ClaudeProxyServer" target */ = {
+		903A6655989160A09D908DC9 /* Exceptions for "ClaudeProxyHost" folder in "ClaudeProxyHost" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
 			);
-			target = 1D41D7277B0C5A0C975A7561 /* ClaudeProxyServer */;
+			target = 1D41D7277B0C5A0C975A7561 /* ClaudeProxyHost */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		2E4B2012E0A63D14233C945A /* ClaudeProxyServer */ = {
+		2E4B2012E0A63D14233C945A /* ClaudeProxyHost */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				903A6655989160A09D908DC9 /* Exceptions for "ClaudeProxyServer" folder in "ClaudeProxyServer" target */,
+				903A6655989160A09D908DC9 /* Exceptions for "ClaudeProxyHost" folder in "ClaudeProxyHost" target */,
 			);
-			path = ClaudeProxyServer;
+			path = ClaudeProxyHost;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -45,7 +45,7 @@
 		A466C9DB8DB2B7417827F4FA = {
 			isa = PBXGroup;
 			children = (
-				2E4B2012E0A63D14233C945A /* ClaudeProxyServer */,
+				2E4B2012E0A63D14233C945A /* ClaudeProxyHost */,
 				225327D0B712EAA2B05670CA /* Products */,
 			);
 			sourceTree = "<group>";
@@ -53,7 +53,7 @@
 		225327D0B712EAA2B05670CA /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				3B11D82F5BBDEC0C4F2F2DC2 /* ClaudeProxyServer.app */,
+				3B11D82F5BBDEC0C4F2F2DC2 /* ClaudeProxyHost.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -61,9 +61,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		1D41D7277B0C5A0C975A7561 /* ClaudeProxyServer */ = {
+		1D41D7277B0C5A0C975A7561 /* ClaudeProxyHost */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = B492C3B8722CA072F2712A9E /* Build configuration list for PBXNativeTarget "ClaudeProxyServer" */;
+			buildConfigurationList = B492C3B8722CA072F2712A9E /* Build configuration list for PBXNativeTarget "ClaudeProxyHost" */;
 			buildPhases = (
 				F0099B77A188047C33910CD6 /* Sources */,
 				E2D436028214139265B34EFF /* Frameworks */,
@@ -74,11 +74,11 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				2E4B2012E0A63D14233C945A /* ClaudeProxyServer */,
+				2E4B2012E0A63D14233C945A /* ClaudeProxyHost */,
 			);
-			name = ClaudeProxyServer;
-			productName = ClaudeProxyServer;
-			productReference = 3B11D82F5BBDEC0C4F2F2DC2 /* ClaudeProxyServer.app */;
+			name = ClaudeProxyHost;
+			productName = ClaudeProxyHost;
+			productReference = 3B11D82F5BBDEC0C4F2F2DC2 /* ClaudeProxyHost.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -96,7 +96,7 @@
 					};
 				};
 			};
-			buildConfigurationList = 574664A375E9F48A92AF902E /* Build configuration list for PBXProject "ClaudeProxyServer" */;
+			buildConfigurationList = 574664A375E9F48A92AF902E /* Build configuration list for PBXProject "ClaudeProxyHost" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -110,7 +110,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				1D41D7277B0C5A0C975A7561 /* ClaudeProxyServer */,
+				1D41D7277B0C5A0C975A7561 /* ClaudeProxyHost */,
 			);
 		};
 /* End PBXProject section */
@@ -183,21 +183,21 @@
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = S9QFG2VH2E;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 4;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = ClaudeProxyServer/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "ClaudeProxyServer";
+				INFOPLIST_FILE = ClaudeProxyHost/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "ClaudeProxyHost";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "ClaudeProxy Server advertises itself and accepts connections from ClaudeProxy clients on your local network.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "ClaudeProxy Host finds ClaudeProxy clients on your local network and connects to them.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.0.2;
-				PRODUCT_BUNDLE_IDENTIFIER = com.leonatan.ClaudeProxyServer;
+				MARKETING_VERSION = 1.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.leonatan.ClaudeProxyHost;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 			};
@@ -209,21 +209,21 @@
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = S9QFG2VH2E;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 3;
+				CURRENT_PROJECT_VERSION = 4;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = ClaudeProxyServer/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "ClaudeProxyServer";
+				INFOPLIST_FILE = ClaudeProxyHost/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "ClaudeProxyHost";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_LSUIElement = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "ClaudeProxy Server advertises itself and accepts connections from ClaudeProxy clients on your local network.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "ClaudeProxy Host finds ClaudeProxy clients on your local network and connects to them.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.0.2;
-				PRODUCT_BUNDLE_IDENTIFIER = com.leonatan.ClaudeProxyServer;
+				MARKETING_VERSION = 1.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.leonatan.ClaudeProxyHost;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = NO;
 			};
@@ -232,7 +232,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		574664A375E9F48A92AF902E /* Build configuration list for PBXProject "ClaudeProxyServer" */ = {
+		574664A375E9F48A92AF902E /* Build configuration list for PBXProject "ClaudeProxyHost" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				F4670FAD6E4DFFCE8E60B9F7 /* Debug */,
@@ -241,7 +241,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		B492C3B8722CA072F2712A9E /* Build configuration list for PBXNativeTarget "ClaudeProxyServer" */ = {
+		B492C3B8722CA072F2712A9E /* Build configuration list for PBXNativeTarget "ClaudeProxyHost" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				72B802ABB785879B1DE06A3E /* Debug */,

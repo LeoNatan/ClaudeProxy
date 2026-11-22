@@ -2,7 +2,7 @@ import Foundation
 import Network
 import os
 
-private let logger = Logger(subsystem: "com.leonatan.ClaudeProxyServer", category: "proxy")
+private let logger = Logger(subsystem: "com.leonatan.ClaudeProxyHost", category: "proxy")
 
 private struct HTTPRequest {
 	let method: String
@@ -37,7 +37,8 @@ private final class Exchange: @unchecked Sendable {
 	}
 }
 
-/// One inbound HTTP/1.1 connection from a client. Requests are handled one at a time; bodies are passed through untouched.
+/// One HTTP/1.1 connection carrying a client's requests (opened by the host to the client). Requests are handled
+/// one at a time; bodies are passed through untouched.
 final class ProxyConnection: @unchecked Sendable {
 	private static let maxHeaderBytes = 64 * 1024
 	private static let maxBodyBytes = 64 * 1024 * 1024
@@ -53,27 +54,35 @@ final class ProxyConnection: @unchecked Sendable {
 
 	private let connection: NWConnection
 	private let queue = DispatchQueue(label: "ClaudeProxy.connection")
-	private let stateProvider: @Sendable () -> ServerState?
+	private let stateProvider: @Sendable () -> HostState?
 	private var buffer = Data()
 	private var busy = false
 	private var closed = false
 	private var sentContinue = false
 	private var currentTask: URLSessionDataTask?
+	private var receivedData = false
+	/// Called on the connection's queue when the connection is established.
+	var onReady: (@Sendable () -> Void)?
+	/// Called on the connection's queue when the first request bytes arrive (the connection is no longer idle).
+	var onFirstData: (@Sendable () -> Void)?
 	var onClose: (@Sendable () -> Void)?
 
-	init(connection: NWConnection, stateProvider: @escaping @Sendable () -> ServerState?) {
+	init(connection: NWConnection, stateProvider: @escaping @Sendable () -> HostState?) {
 		self.connection = connection
 		self.stateProvider = stateProvider
 	}
 
 	func start() {
 		connection.stateUpdateHandler = { [weak self] state in
+			guard let self else {
+				return
+			}
 			switch state {
-			case .failed, .cancelled:
-				guard let self else {
-					return
-				}
-				self.queue.async { self.close() }
+			case .ready:
+				onReady?()
+			case .failed, .cancelled, .waiting:
+				// Waiting means the client is unreachable; the pool decides when to try again.
+				queue.async { self.close() }
 			default:
 				break
 			}
@@ -88,6 +97,11 @@ final class ProxyConnection: @unchecked Sendable {
 				return
 			}
 			if let data, !data.isEmpty {
+				if !receivedData {
+					receivedData = true
+					onFirstData?()
+					onFirstData = nil
+				}
 				buffer.append(data)
 				if !busy {
 					processBuffer()
@@ -102,6 +116,10 @@ final class ProxyConnection: @unchecked Sendable {
 				receive()
 			}
 		}
+	}
+
+	func cancel() {
+		queue.async { self.close() }
 	}
 
 	private func close() {
@@ -237,7 +255,7 @@ final class ProxyConnection: @unchecked Sendable {
 
 	private func handle(_ request: HTTPRequest) {
 		guard let state = stateProvider() else {
-			sendSimple(status: 503, message: "ClaudeProxy Server is still loading settings.", keepAlive: request.keepAlive)
+			sendSimple(status: 503, message: "ClaudeProxy Host is still loading settings.", keepAlive: request.keepAlive)
 			return
 		}
 
@@ -277,7 +295,7 @@ final class ProxyConnection: @unchecked Sendable {
 		send(upstreamRequest, body: request.body, request: request, state: state, attempt: 0)
 	}
 
-	private func send(_ unauthorized: URLRequest, body: Data, request: HTTPRequest, state: ServerState, attempt: Int) {
+	private func send(_ unauthorized: URLRequest, body: Data, request: HTTPRequest, state: HostState, attempt: Int) {
 		DispatchQueue.global(qos: .userInitiated).async { [self] in
 			var authorized = unauthorized
 			do {
@@ -294,7 +312,7 @@ final class ProxyConnection: @unchecked Sendable {
 		}
 	}
 
-	private func start(_ authorized: URLRequest, unauthorized: URLRequest, body: Data, request: HTTPRequest, state: ServerState, attempt: Int) {
+	private func start(_ authorized: URLRequest, unauthorized: URLRequest, body: Data, request: HTTPRequest, state: HostState, attempt: Int) {
 		guard !closed else {
 			return
 		}

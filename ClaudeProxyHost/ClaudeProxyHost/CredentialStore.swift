@@ -4,7 +4,7 @@ struct CredentialError: Error, Sendable {
 	let message: String
 }
 
-/// Holds the server's credentials and applies them to upstream requests. Values never leave this object
+/// Holds the host's credentials and applies them to upstream requests. Values never leave this object
 /// except as request headers to the configured upstream, and as the redaction list.
 final class CredentialStore: @unchecked Sendable {
 	private let settings: ResolvedSettings

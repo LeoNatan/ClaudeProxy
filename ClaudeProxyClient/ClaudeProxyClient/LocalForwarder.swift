@@ -1,7 +1,7 @@
 import Foundation
 import Network
 
-/// Listens on 127.0.0.1 and splices each connection to the selected server, byte for byte.
+/// Listens on 127.0.0.1 for Claude Code and pairs each connection with one of the host's pooled connections, byte for byte.
 final class LocalForwarder: @unchecked Sendable {
 	enum Status: Sendable {
 		case stopped
@@ -9,25 +9,17 @@ final class LocalForwarder: @unchecked Sendable {
 		case failed(String)
 	}
 
-	private let queue = DispatchQueue(label: "ClaudeProxyClient.forwarder")
-	private let lock = NSLock()
-	private var _target: NWEndpoint?
+	/// How long a Claude Code connection waits for the host to provide a connection.
+	private static let hostWait: TimeInterval = 10
+
+	private let pool: HostConnectionPool
+	private var queue: DispatchQueue { pool.queue }
 	private var listener: NWListener?
 	private var splices: [ObjectIdentifier: Splice] = [:]
 	var onStatus: (@Sendable (Status) -> Void)?
 
-	/// The server new connections go to. Existing connections keep theirs.
-	var target: NWEndpoint? {
-		get {
-			lock.lock()
-			defer { lock.unlock() }
-			return _target
-		}
-		set {
-			lock.lock()
-			_target = newValue
-			lock.unlock()
-		}
+	init(pool: HostConnectionPool) {
+		self.pool = pool
 	}
 
 	func start(port: UInt16) {
@@ -70,36 +62,40 @@ final class LocalForwarder: @unchecked Sendable {
 	}
 
 	private func accept(_ inbound: NWConnection) {
-		guard let target else {
-			Splice.reject(inbound, queue: queue, status: 503, message: "ClaudeProxy Client: no server selected.")
-			return
-		}
-		let splice = Splice(inbound: inbound, outbound: NWConnection(to: target, using: .tcp), queue: queue)
-		let id = ObjectIdentifier(splice)
-		splice.onFinish = { [weak self] in
+		pool.take(timeout: Self.hostWait) { [weak self] outbound in
 			guard let self else {
 				return
 			}
-			queue.async {
-				self.splices[id] = nil
+			guard let outbound else {
+				Splice.reject(inbound, queue: queue, status: 503, message: "ClaudeProxy Client: no ClaudeProxy host is connected to this Mac.")
+				return
 			}
+			let splice = Splice(inbound: inbound, outbound: outbound, queue: queue)
+			let id = ObjectIdentifier(splice)
+			splice.onFinish = { [weak self] in
+				guard let self else {
+					return
+				}
+				queue.async {
+					self.splices[id] = nil
+				}
+			}
+			splices[id] = splice
+			splice.start()
 		}
-		splices[id] = splice
-		splice.start()
 	}
 }
 
-/// Two connections piped into each other, with half-close propagated.
+/// Two connections piped into each other, with half-close propagated. Everything runs on one serial queue.
 private final class Splice: @unchecked Sendable {
 	private let inbound: NWConnection
 	private let outbound: NWConnection
 	private let queue: DispatchQueue
-	private var outboundReady = false
-	private var sentAnything = false
 	private var openDirections = 2
 	private var finished = false
 	var onFinish: (@Sendable () -> Void)?
 
+	/// `outbound` is a host connection that is already established.
 	init(inbound: NWConnection, outbound: NWConnection, queue: DispatchQueue) {
 		self.inbound = inbound
 		self.outbound = outbound
@@ -107,7 +103,7 @@ private final class Splice: @unchecked Sendable {
 	}
 
 	func start() {
-		inbound.stateUpdateHandler = { [weak self] state in
+		let endOnFailure: @Sendable (NWConnection.State) -> Void = { [weak self] state in
 			switch state {
 			case .failed, .cancelled:
 				self?.finish()
@@ -115,60 +111,19 @@ private final class Splice: @unchecked Sendable {
 				break
 			}
 		}
-		outbound.stateUpdateHandler = { [weak self] state in
-			guard let self else {
-				return
-			}
-			switch state {
-			case .ready:
-				guard !outboundReady else {
-					return
-				}
-				outboundReady = true
-				pump(from: inbound, to: outbound, countsAsSent: false)
-				pump(from: outbound, to: inbound, countsAsSent: true)
-			case .waiting, .failed:
-				if !outboundReady {
-					outboundFailed()
-				} else {
-					finish()
-				}
-			case .cancelled:
-				finish()
-			default:
-				break
-			}
-		}
+		inbound.stateUpdateHandler = endOnFailure
+		outbound.stateUpdateHandler = endOnFailure
 		inbound.start(queue: queue)
-		outbound.start(queue: queue)
-		// A Bonjour endpoint that never resolves leaves the connection waiting forever.
-		queue.asyncAfter(deadline: .now() + 10) { [weak self] in
-			guard let self, !outboundReady else {
-				return
-			}
-			outboundFailed()
-		}
+		pump(from: inbound, to: outbound)
+		pump(from: outbound, to: inbound)
 	}
 
-	private func outboundFailed() {
-		guard !finished else {
-			return
-		}
-		Self.reject(inbound, queue: queue, status: 502, message: "ClaudeProxy Client: the server is unreachable.", alreadyStarted: true)
-		outbound.cancel()
-		finished = true
-		onFinish?()
-	}
-
-	private func pump(from source: NWConnection, to destination: NWConnection, countsAsSent: Bool) {
+	private func pump(from source: NWConnection, to destination: NWConnection) {
 		source.receive(minimumIncompleteLength: 1, maximumLength: 256 * 1024) { [weak self] data, _, isComplete, error in
 			guard let self, !finished else {
 				return
 			}
 			if let data, !data.isEmpty {
-				if countsAsSent {
-					sentAnything = true
-				}
 				destination.send(content: data, completion: .contentProcessed { [weak self] error in
 					guard let self else {
 						return
@@ -178,7 +133,7 @@ private final class Splice: @unchecked Sendable {
 					} else if isComplete {
 						closeDirection(destination)
 					} else {
-						pump(from: source, to: destination, countsAsSent: countsAsSent)
+						pump(from: source, to: destination)
 					}
 				})
 			} else if isComplete {
@@ -186,7 +141,7 @@ private final class Splice: @unchecked Sendable {
 			} else if error != nil {
 				finish()
 			} else {
-				pump(from: source, to: destination, countsAsSent: countsAsSent)
+				pump(from: source, to: destination)
 			}
 		}
 	}
@@ -211,14 +166,12 @@ private final class Splice: @unchecked Sendable {
 	}
 
 	/// Answers with an Anthropic-shaped error so Claude Code shows something useful.
-	static func reject(_ connection: NWConnection, queue: DispatchQueue, status: Int, message: String, alreadyStarted: Bool = false) {
+	static func reject(_ connection: NWConnection, queue: DispatchQueue, status: Int, message: String) {
 		let payload: [String: Any] = ["type": "error", "error": ["type": "api_error", "message": message]]
 		let body = (try? JSONSerialization.data(withJSONObject: payload)) ?? Data()
 		var response = Data("HTTP/1.1 \(status) \(HTTPURLResponse.localizedString(forStatusCode: status).capitalized)\r\nContent-Type: application/json\r\nContent-Length: \(body.count)\r\nConnection: close\r\n\r\n".utf8)
 		response.append(body)
-		if !alreadyStarted {
-			connection.start(queue: queue)
-		}
+		connection.start(queue: queue)
 		connection.send(content: response, contentContext: .finalMessage, isComplete: true, completion: .contentProcessed { _ in
 			connection.cancel()
 		})

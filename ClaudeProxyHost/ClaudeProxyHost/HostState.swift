@@ -1,7 +1,7 @@
 import Foundation
 
 /// One generation of resolved configuration. Replaced wholesale on reload; in-flight requests keep theirs.
-final class ServerState: Sendable {
+final class HostState: Sendable {
 	let settings: ResolvedSettings
 	let plan: UpstreamPlan
 	let credentials: CredentialStore

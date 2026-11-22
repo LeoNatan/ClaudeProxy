@@ -16,7 +16,7 @@
 	</dict>
 	<key>NSBonjourServices</key>
 	<array>
-		<string>_claudeproxy._tcp</string>
+		<string>_claudeproxy-client._tcp</string>
 	</array>
 </dict>
 </plist>

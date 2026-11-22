@@ -59,7 +59,7 @@ enum SettingsResolver {
 
 	/// Resolves, highest precedence first:
 	/// server-managed (cached) → MDM profile → managed-settings.json + managed-settings.d → user settings.json → login shell env.
-	/// Project, local and `--settings` scopes don't apply: the server has no project or session.
+	/// Project, local and `--settings` scopes don't apply: the host has no project or session.
 	static func resolve() -> ResolvedSettings {
 		let shellEnvironment = ShellEnvironment.capture()
 		var notes: [String] = []
@@ -112,7 +112,7 @@ enum SettingsResolver {
 			apply(keys: winner.settings, source: winner.name, to: &resolved)
 		}
 
-		notes.append("Project, local and --settings scopes don't apply to the server.")
+		notes.append("Project, local and --settings scopes don't apply to the host.")
 		resolved.notes = notes
 		return resolved
 	}

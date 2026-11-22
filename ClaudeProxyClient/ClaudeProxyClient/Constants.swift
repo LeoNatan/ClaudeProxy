@@ -1,14 +1,18 @@
 import Foundation
 
-/// Values shared between ClaudeProxy Server and Client. Keep in sync with the server's copy.
+/// Values shared between ClaudeProxy Host and Client. Keep in sync with the host's copy.
 enum ClaudeProxyProtocol {
-	static let serviceType = "_claudeproxy._tcp"
-	static let version = 1
+	/// Clients advertise this; the host browses for it and connects out to each client.
+	static let clientServiceType = "_claudeproxy-client._tcp"
+	static let version = 2
 	static let infoPath = "/_claudeproxy/info"
-	/// Below macOS's ephemeral range (49152–65535), where outgoing connections can already hold a port.
-	static let defaultServerPort: UInt16 = 41820
+	// Ports stay below macOS's ephemeral range (49152–65535), where outgoing connections can already hold them.
+
+	/// Port on 127.0.0.1 that Claude Code on a client connects to.
 	static let defaultClientPort: UInt16 = 41821
-	/// Sent by clients in place of a real credential; the server always replaces it.
+	/// Port a client listens on for the host's connections.
+	static let defaultClientNetworkPort: UInt16 = 41822
+	/// Sent by clients in place of a real credential; the host always replaces it.
 	static let placeholderToken = "claudeproxy-placeholder"
 }
 

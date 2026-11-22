@@ -5,19 +5,18 @@ import ServiceManagement
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 	private enum Defaults {
-		static let selectedServer = "selectedServer"
-		static let useManual = "useManualServer"
-		static let manualHost = "manualHost"
-		static let manualPort = "manualPort"
 		static let localPort = "localPort"
+		static let networkPort = "networkPort"
 	}
 
+	private static let serviceName = Host.current().localizedName ?? "ClaudeProxy Client"
+
 	private var statusItem: NSStatusItem!
-	private let browser = ServerBrowser()
-	private let forwarder = LocalForwarder()
+	private let pool = HostConnectionPool(serviceName: AppDelegate.serviceName)
+	private lazy var forwarder = LocalForwarder(pool: pool)
 	private let installer = SettingsInstaller()
-	private let scanner = NetworkScanner()
 	private var forwarderStatus: LocalForwarder.Status = .stopped
+	private var poolStatus: HostConnectionPool.Status = .stopped
 	private var profile: ClientProfile?
 	private var profileError: String?
 	private var installError: String?
@@ -25,36 +24,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 	private var pollTimer: Timer?
 
 	private var localPort: UInt16 {
-		get {
-			let stored = UserDefaults.standard.integer(forKey: Defaults.localPort)
-			return stored > 0 && stored <= Int(UInt16.max) ? UInt16(stored) : ClaudeProxyProtocol.defaultClientPort
-		}
-		set {
-			UserDefaults.standard.set(Int(newValue), forKey: Defaults.localPort)
-		}
+		get { Self.port(forKey: Defaults.localPort, default: ClaudeProxyProtocol.defaultClientPort) }
+		set { UserDefaults.standard.set(Int(newValue), forKey: Defaults.localPort) }
 	}
 
-	private var useManual: Bool {
-		get { UserDefaults.standard.bool(forKey: Defaults.useManual) }
-		set { UserDefaults.standard.set(newValue, forKey: Defaults.useManual) }
+	private var networkPort: UInt16 {
+		get { Self.port(forKey: Defaults.networkPort, default: ClaudeProxyProtocol.defaultClientNetworkPort) }
+		set { UserDefaults.standard.set(Int(newValue), forKey: Defaults.networkPort) }
 	}
 
-	private var selectedServerName: String? {
-		get { UserDefaults.standard.string(forKey: Defaults.selectedServer) }
-		set { UserDefaults.standard.set(newValue, forKey: Defaults.selectedServer) }
-	}
-
-	private var manualHost: String {
-		get { UserDefaults.standard.string(forKey: Defaults.manualHost) ?? "" }
-		set { UserDefaults.standard.set(newValue, forKey: Defaults.manualHost) }
-	}
-
-	private var manualPort: UInt16 {
-		get {
-			let stored = UserDefaults.standard.integer(forKey: Defaults.manualPort)
-			return stored > 0 && stored <= Int(UInt16.max) ? UInt16(stored) : ClaudeProxyProtocol.defaultServerPort
-		}
-		set { UserDefaults.standard.set(Int(newValue), forKey: Defaults.manualPort) }
+	private static func port(forKey key: String, default defaultPort: UInt16) -> UInt16 {
+		let stored = UserDefaults.standard.integer(forKey: key)
+		return stored > 0 && stored <= Int(UInt16.max) ? UInt16(stored) : defaultPort
 	}
 
 	func applicationDidFinishLaunching(_ notification: Notification) {
@@ -73,120 +54,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 				}
 			}
 		}
-		forwarder.start(port: localPort)
-
-		browser.onChange = { [weak self] in
-			self?.serversChanged()
-		}
-		browser.start()
-		refreshTarget()
-
-		scanner.onChange = { [weak self] in
-			self?.scanChanged()
-		}
-		// Servers that can't advertise over Bonjour are still found by asking the subnet directly.
-		DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
-			MainActor.assumeIsolated {
-				guard let self, self.browser.servers.isEmpty, !self.useManual || self.profile == nil else {
-					return
+		pool.onStatus = { [weak self] status in
+			DispatchQueue.main.async {
+				MainActor.assumeIsolated {
+					self?.poolStatus = status
+					self?.updateIcon()
 				}
-				self.startScan()
 			}
 		}
+		// A host connecting for the first time is the moment to learn its profile.
+		pool.onChange = { [weak self] in
+			DispatchQueue.main.async {
+				MainActor.assumeIsolated {
+					guard let self, self.profile == nil || self.profileError != nil else {
+						return
+					}
+					self.fetchProfile()
+				}
+			}
+		}
+		forwarder.start(port: localPort)
+		pool.start(port: networkPort)
 
-		pollTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+		pollTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
 			MainActor.assumeIsolated {
 				self?.fetchProfile()
 			}
 		}
 	}
 
-	// MARK: Server selection
+	// MARK: Host profile
 
-	private var selectedServer: ServerBrowser.Server? {
-		guard !useManual else {
-			return nil
-		}
-		return browser.servers.first { $0.name == selectedServerName }
-	}
-
-	private var currentEndpoint: NWEndpoint? {
-		if useManual {
-			guard !manualHost.isEmpty, let port = NWEndpoint.Port(rawValue: manualPort) else {
-				return nil
-			}
-			return .hostPort(host: NWEndpoint.Host(manualHost), port: port)
-		}
-		return selectedServer?.endpoint
-	}
-
-	private var currentServerTitle: String? {
-		useManual ? (manualHost.isEmpty ? nil : "\(manualHost):\(manualPort)") : selectedServerName
-	}
-
-	private func serversChanged() {
-		// With nothing chosen yet, a single discovered server is the obvious pick.
-		if !useManual, selectedServerName == nil, browser.servers.count == 1 {
-			selectedServerName = browser.servers[0].name
-		}
-		let previous = forwarder.target
-		refreshTarget(fetch: false)
-		if previous != forwarder.target || (selectedServer?.profileVersion).map({ $0 != profile?.pv }) ?? false {
-			fetchProfile()
-		}
-	}
-
-	private func startScan() {
-		var ports = [ClaudeProxyProtocol.defaultServerPort]
-		if !ports.contains(manualPort) {
-			ports.append(manualPort)
-		}
-		scanner.scan(ports: ports)
-	}
-
-	private func scanChanged() {
-		// Like Bonjour: with nothing chosen yet, a single server found is the obvious pick.
-		if !scanner.isScanning, browser.servers.isEmpty, selectedServerName == nil, !useManual, scanner.results.count == 1 {
-			let result = scanner.results[0]
-			manualHost = result.host
-			manualPort = result.port
-			useManual = true
-			refreshTarget()
-		}
-	}
-
-	private var scannedServers: [NetworkScanner.Result] {
-		let bonjourNames = Set(browser.servers.map(\.name))
-		return scanner.results.filter { !bonjourNames.contains($0.name) }
-	}
-
-	private func refreshTarget(fetch: Bool = true) {
-		forwarder.target = currentEndpoint
-		if forwarder.target == nil {
-			profile = nil
-			profileError = nil
-		}
-		updateIcon()
-		if fetch {
-			fetchProfile()
-		}
-	}
-
-	/// Handshake: learn the server's provider profile, and re-install if it changed.
+	/// Handshake: learn the host's provider profile over one of its connections, and re-install if it changed.
 	private func fetchProfile() {
-		guard let endpoint = currentEndpoint, !fetching else {
+		guard !fetching else {
 			return
 		}
 		fetching = true
-		InfoClient.fetch(endpoint) { [weak self] result in
+		pool.take(timeout: 0.5) { [weak self] connection in
+			DispatchQueue.main.async {
+				MainActor.assumeIsolated {
+					self?.fetchProfile(over: connection)
+				}
+			}
+		}
+	}
+
+	private func fetchProfile(over connection: NWConnection?) {
+		guard let connection else {
+			fetching = false
+			updateIcon()
+			return
+		}
+		InfoClient.fetch(over: connection) { [weak self] result in
 			guard let self else {
 				return
 			}
 			fetching = false
-			guard endpoint == currentEndpoint else {
-				fetchProfile()
-				return
-			}
 			switch result {
 			case let .success(profile):
 				self.profile = profile
@@ -208,7 +132,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 		return env
 	}
 
-	/// Keeps an existing installation in step with the server's profile and the local port.
+	/// Keeps an existing installation in step with the host's profile and the local port.
 	private func syncInstallation() {
 		guard installer.isInstalled, let desiredEnv, desiredEnv != installer.installedEnv else {
 			return
@@ -223,10 +147,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
 	private func updateIcon() {
 		let healthy: Bool = {
-			guard case .listening = forwarderStatus else {
+			guard case .listening = forwarderStatus, case .listening = poolStatus else {
 				return false
 			}
-			return profile != nil && profileError == nil && installError == nil
+			return pool.hasHost && profile != nil && profileError == nil && installError == nil
 		}()
 		let symbol = healthy ? (installer.isInstalled ? "point.3.filled.connected.trianglepath.dotted" : "point.3.connected.trianglepath.dotted") : "exclamationmark.triangle"
 		statusItem.button?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: "ClaudeProxy Client")
@@ -257,57 +181,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 	func menuNeedsUpdate(_ menu: NSMenu) {
 		menu.removeAllItems()
 
-		if let title = currentServerTitle {
-			if let profile {
-				let provider = profile.provider == "anthropic" ? "Anthropic API / gateway" : profile.provider
-				menu.addItem(info("Server: \(title) — \(provider)"))
-			} else if let profileError {
-				menu.addItem(info("⚠︎ \(title): \(profileError)"))
-			} else {
-				menu.addItem(info(useManual || selectedServer != nil ? "Server: \(title) — connecting…" : "Server: \(title) — not found on the network"))
-			}
+		let hasHost = pool.hasHost
+		if let profile {
+			let provider = profile.provider == "anthropic" ? "Anthropic API / gateway" : profile.provider
+			menu.addItem(info("Host: \(profile.name) — \(provider)\(hasHost ? "" : " (disconnected)")"))
+		} else if hasHost {
+			menu.addItem(info(profileError.map { "⚠︎ Host connected, but: \($0)" } ?? "Host connected — loading…"))
 		} else {
-			menu.addItem(info("No server selected"))
+			menu.addItem(info("Waiting for a ClaudeProxy host to connect"))
+		}
+
+		switch poolStatus {
+		case .stopped:
+			break
+		case let .listening(port, advertised):
+			menu.addItem(info(advertised ? "Discoverable as “\(pool.serviceName)” on port \(port)" : "Listening on port \(port), not advertised over Bonjour (retrying)"))
+			if !advertised {
+				menu.addItem(info("ⓘ Allow ClaudeProxy Client in System Settings › Privacy & Security › Local Network"))
+			}
+		case let .failed(message):
+			menu.addItem(info("⚠︎ Network listener: \(message)"))
 		}
 		switch forwarderStatus {
 		case .stopped:
-			menu.addItem(info("Local proxy: stopped"))
+			break
 		case let .listening(port):
-			menu.addItem(info("Local proxy: 127.0.0.1:\(port)"))
+			menu.addItem(info("Claude Code connects to 127.0.0.1:\(port)"))
 		case let .failed(message):
 			menu.addItem(info("⚠︎ Local proxy: \(message)"))
 		}
 
-		menu.addItem(.separator())
-		menu.addItem(info("Servers on This Network"))
-		if browser.servers.isEmpty && scannedServers.isEmpty {
-			menu.addItem(info(scanner.isScanning ? "    Searching…" : "    None found"))
+		let addresses = Self.localAddresses()
+		if !addresses.isEmpty {
+			menu.addItem(info("Copy Address for the Host’s “Add Client by Address”:"))
+			for address in addresses {
+				let copy = item("\(address.ip):\(networkPort)  (\(address.interface))", #selector(copyAddress(_:)))
+				copy.representedObject = "\(address.ip):\(networkPort)"
+				copy.indentationLevel = 1
+				menu.addItem(copy)
+			}
 		}
-		for server in browser.servers {
-			let item = item(server.name, #selector(selectServer(_:)))
-			item.representedObject = server.name
-			item.state = !useManual && server.name == selectedServerName ? .on : .off
-			item.indentationLevel = 1
-			menu.addItem(item)
-		}
-		var manualMatchesScan = false
-		for server in scannedServers {
-			let item = item("\(server.name) (\(server.host))", #selector(selectScannedServer(_:)))
-			item.representedObject = "\(server.host):\(server.port)"
-			let selected = useManual && manualHost == server.host && manualPort == server.port
-			manualMatchesScan = manualMatchesScan || selected
-			item.state = selected ? .on : .off
-			item.indentationLevel = 1
-			menu.addItem(item)
-		}
-		let scan = item(scanner.isScanning ? "Scanning Network…" : "Scan Network", #selector(scanNetwork))
-		scan.isEnabled = !scanner.isScanning
-		scan.indentationLevel = 1
-		menu.addItem(scan)
-		let manual = item(manualHost.isEmpty || manualMatchesScan ? "Manual Server…" : "Manual: \(manualHost):\(manualPort)…", #selector(configureManualServer))
-		manual.state = useManual && !manualMatchesScan ? .on : .off
-		manual.indentationLevel = 1
-		menu.addItem(manual)
 
 		menu.addItem(.separator())
 		if installer.isInstalled {
@@ -318,7 +231,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 			install.isEnabled = profile != nil
 			menu.addItem(install)
 			if profile == nil {
-				menu.addItem(info("Select a reachable server to install"))
+				menu.addItem(info("Available once a host has connected"))
 			}
 		}
 		if let installError {
@@ -330,9 +243,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 				menu.addItem(info("⚠︎ Managed settings override: \(overridden.joined(separator: ", "))"))
 			}
 		}
-		menu.addItem(item("Local Port \(localPort)…", #selector(changeLocalPort)))
 
 		menu.addItem(.separator())
+		menu.addItem(item("Local Port \(localPort)…", #selector(changeLocalPort)))
+		menu.addItem(item("Network Port \(networkPort)…", #selector(changeNetworkPort)))
 		let login = item("Start at Login", #selector(toggleLogin))
 		login.state = SMAppService.mainApp.status == .enabled ? .on : .off
 		menu.addItem(login)
@@ -349,81 +263,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 		return item
 	}
 
+	/// IPv4 addresses of active LAN interfaces, the ones the host can reach.
+	private static func localAddresses() -> [(ip: String, interface: String)] {
+		var result: [(String, String)] = []
+		var interfaces: UnsafeMutablePointer<ifaddrs>?
+		guard getifaddrs(&interfaces) == 0, let first = interfaces else {
+			return []
+		}
+		defer { freeifaddrs(interfaces) }
+		for pointer in sequence(first: first, next: { $0.pointee.ifa_next }) {
+			let entry = pointer.pointee
+			let flags = Int32(entry.ifa_flags)
+			guard let address = entry.ifa_addr, address.pointee.sa_family == UInt8(AF_INET),
+				  flags & IFF_UP != 0, flags & IFF_RUNNING != 0, flags & IFF_BROADCAST != 0, flags & IFF_LOOPBACK == 0 else {
+				continue
+			}
+			var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+			guard getnameinfo(address, socklen_t(address.pointee.sa_len), &host, socklen_t(host.count), nil, 0, NI_NUMERICHOST) == 0 else {
+				continue
+			}
+			let ip = String(decoding: host.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
+			result.append((ip, String(validatingCString: entry.ifa_name) ?? "?"))
+		}
+		return result
+	}
+
 	// MARK: Actions
 
-	@objc private func selectServer(_ sender: NSMenuItem) {
-		guard let name = sender.representedObject as? String else {
+	@objc private func copyAddress(_ sender: NSMenuItem) {
+		guard let value = sender.representedObject as? String else {
 			return
 		}
-		useManual = false
-		selectedServerName = name
-		profile = nil
-		profileError = nil
-		refreshTarget()
-	}
-
-	@objc private func selectScannedServer(_ sender: NSMenuItem) {
-		guard let value = sender.representedObject as? String, let colon = value.lastIndex(of: ":"),
-			  let port = UInt16(value[value.index(after: colon)...]) else {
-			return
-		}
-		manualHost = String(value[..<colon])
-		manualPort = port
-		useManual = true
-		profile = nil
-		profileError = nil
-		refreshTarget()
-	}
-
-	@objc private func scanNetwork() {
-		startScan()
-	}
-
-	@objc private func configureManualServer() {
-		NSApp.activate()
-		let alert = NSAlert()
-		alert.messageText = "Manual Server"
-		alert.informativeText = "IP address (or host name) and port of a ClaudeProxy Server. The server menu has a Copy item for its address."
-		let host = NSTextField(frame: NSRect(x: 0, y: 30, width: 260, height: 24))
-		host.placeholderString = "192.168.1.10"
-		host.stringValue = manualHost
-		let port = NSTextField(frame: NSRect(x: 0, y: 0, width: 100, height: 24))
-		port.placeholderString = String(ClaudeProxyProtocol.defaultServerPort)
-		port.stringValue = String(manualPort)
-		let container = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 54))
-		container.addSubview(host)
-		container.addSubview(port)
-		alert.accessoryView = container
-		alert.addButton(withTitle: "Use This Server")
-		alert.addButton(withTitle: "Cancel")
-		if useManual {
-			alert.addButton(withTitle: "Use Bonjour Instead")
-		}
-		alert.window.initialFirstResponder = host
-		switch alert.runModal() {
-		case .alertFirstButtonReturn:
-			var hostValue = host.stringValue.trimmingCharacters(in: .whitespaces)
-			var portString = port.stringValue.trimmingCharacters(in: .whitespaces)
-			// Accept a pasted "address:port" in the host field (IPv4 or host name; IPv6 has its own colons).
-			if let colon = hostValue.lastIndex(of: ":"), hostValue.filter({ $0 == ":" }).count == 1, UInt16(hostValue[hostValue.index(after: colon)...]) != nil {
-				portString = String(hostValue[hostValue.index(after: colon)...])
-				hostValue = String(hostValue[..<colon])
-			}
-			guard !hostValue.isEmpty, let portValue = UInt16(portString), portValue > 0 else {
-				NSSound.beep()
-				return
-			}
-			manualHost = hostValue
-			manualPort = portValue
-			useManual = true
-		case .alertThirdButtonReturn:
-			useManual = false
-		default:
-			return
-		}
-		profile = nil
-		profileError = nil
-		refreshTarget()
+		NSPasteboard.general.clearContents()
+		NSPasteboard.general.setString(value, forType: .string)
 	}
 
 	@objc private func install() {
@@ -454,33 +326,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 	}
 
 	@objc private func changeLocalPort() {
-		NSApp.activate()
-		let alert = NSAlert()
-		alert.messageText = "Local Port"
-		alert.informativeText = "Claude Code on this Mac connects to 127.0.0.1 on this port."
-		let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 24))
-		field.stringValue = String(localPort)
-		alert.accessoryView = field
-		alert.addButton(withTitle: "Save")
-		alert.addButton(withTitle: "Cancel")
-		alert.addButton(withTitle: "Use Default (\(ClaudeProxyProtocol.defaultClientPort))")
-		alert.window.initialFirstResponder = field
-		let newPort: UInt16
-		switch alert.runModal() {
-		case .alertFirstButtonReturn:
-			guard let value = UInt16(field.stringValue.trimmingCharacters(in: .whitespaces)), value > 0 else {
-				NSSound.beep()
-				return
-			}
-			newPort = value
-		case .alertThirdButtonReturn:
-			newPort = ClaudeProxyProtocol.defaultClientPort
-		default:
+		guard let newPort = askForPort(title: "Local Port", message: "Claude Code on this Mac connects to 127.0.0.1 on this port.", current: localPort, default: ClaudeProxyProtocol.defaultClientPort) else {
 			return
 		}
 		localPort = newPort
 		forwarder.start(port: newPort)
 		syncInstallation()
+	}
+
+	@objc private func changeNetworkPort() {
+		guard let newPort = askForPort(title: "Network Port", message: "The host connects to this Mac on this port. A host that found this client over Bonjour follows the change; one that added it by address needs the new port.", current: networkPort, default: ClaudeProxyProtocol.defaultClientNetworkPort) else {
+			return
+		}
+		networkPort = newPort
+		pool.start(port: newPort)
+	}
+
+	private func askForPort(title: String, message: String, current: UInt16, default defaultPort: UInt16) -> UInt16? {
+		NSApp.activate()
+		let alert = NSAlert()
+		alert.messageText = title
+		alert.informativeText = message
+		let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 24))
+		field.stringValue = String(current)
+		alert.accessoryView = field
+		alert.addButton(withTitle: "Save")
+		alert.addButton(withTitle: "Cancel")
+		alert.addButton(withTitle: "Use Default (\(defaultPort))")
+		alert.window.initialFirstResponder = field
+		switch alert.runModal() {
+		case .alertFirstButtonReturn:
+			guard let value = UInt16(field.stringValue.trimmingCharacters(in: .whitespaces)), value > 0 else {
+				NSSound.beep()
+				return nil
+			}
+			return value
+		case .alertThirdButtonReturn:
+			return defaultPort
+		default:
+			return nil
+		}
 	}
 
 	@objc private func toggleLogin() {

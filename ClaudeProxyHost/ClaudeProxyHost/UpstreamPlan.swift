@@ -62,7 +62,7 @@ struct ProxyRequestError: Error, Sendable {
 	let message: String
 }
 
-/// Where requests go and how their URLs are formed. The host always comes from the server's settings;
+/// Where requests go and how their URLs are formed. The upstream host always comes from this Mac's settings;
 /// a client only contributes the path and query.
 struct UpstreamPlan: Sendable {
 	let provider: Provider
@@ -239,8 +239,8 @@ struct UpstreamPlan: Sendable {
 }
 
 enum ClientProfileBuilder {
-	/// Non-secret variables a client's Claude Code needs to address the same models/projects as the server.
-	/// Whitelist only: anything not listed here never leaves the server.
+	/// Non-secret variables a client's Claude Code needs to address the same models/projects as the host.
+	/// Whitelist only: anything not listed here never leaves the host.
 	private static let passthroughVariables: Set<String> = [
 		"ANTHROPIC_MODEL",
 		"ANTHROPIC_DEFAULT_MODEL",

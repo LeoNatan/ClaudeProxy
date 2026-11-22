@@ -2,8 +2,10 @@
 
 Two independent macOS menu bar apps (AppKit, Swift 6, macOS 15+, Apple silicon):
 
-- `ClaudeProxyServer/` — runs on the Mac that holds Claude Code's configuration and credentials.
-- `ClaudeProxyClient/` — runs on other Macs and points their Claude Code at the server.
+- `ClaudeProxyHost/` — runs on the Mac that holds Claude Code's configuration and credentials (the *host*; called "server" before 2.0).
+- `ClaudeProxyClient/` — runs on other Macs and points their Claude Code at the host.
+
+The host connects **out** to clients, never the other way round, so it works on a managed Mac that can't advertise over Bonjour (`NoMulticastAdvertisements`) or accept incoming connections. Each client advertises `_claudeproxy-client._tcp` and listens on its network port (default 41822). The host browses for clients (or uses addresses added by hand) and keeps a pool of idle connections open to each. When Claude Code on the client connects to `127.0.0.1` (default 41821), the client pairs that connection with one idle host connection and splices the bytes; the host serves the HTTP on it exactly as before (credential swap, redaction, streaming, `/_claudeproxy/info` handshake).
 
 Each folder has its own `.xcodeproj` (folder-synchronized groups). `Constants.swift` and `ProcessRunner.swift` exist in both apps as copies: change them in both.
 
@@ -13,7 +15,7 @@ Releases are GitHub releases on `LeoNatan/ClaudeProxy`, tagged `vX.Y.Z` from `ma
 
 ### 1. Bump the version (both projects)
 
-In `ClaudeProxyServer/ClaudeProxyServer.xcodeproj/project.pbxproj` and `ClaudeProxyClient/ClaudeProxyClient.xcodeproj/project.pbxproj`, in both the Debug and Release target configurations:
+In `ClaudeProxyHost/ClaudeProxyHost.xcodeproj/project.pbxproj` and `ClaudeProxyClient/ClaudeProxyClient.xcodeproj/project.pbxproj`, in both the Debug and Release target configurations:
 
 - `MARKETING_VERSION` → the new version (`1.0.3`).
 - `CURRENT_PROJECT_VERSION` → increment by one.
@@ -31,7 +33,7 @@ Build with the default DerivedData location (no `-derivedDataPath`) and stage th
 ```sh
 VERSION=1.0.3
 STAGE=$(mktemp -d)
-for APP in ClaudeProxyServer ClaudeProxyClient; do
+for APP in ClaudeProxyHost ClaudeProxyClient; do
 	xcodebuild -project $APP/$APP.xcodeproj -scheme $APP -configuration Release -allowProvisioningUpdates clean build
 	PRODUCTS=$(xcodebuild -project $APP/$APP.xcodeproj -scheme $APP -configuration Release -showBuildSettings | awk -F' = ' '/ BUILT_PRODUCTS_DIR /{print $2}')
 	ditto "$PRODUCTS/$APP.app" "$STAGE/$APP.app"
@@ -45,13 +47,13 @@ for APP in ClaudeProxyServer ClaudeProxyClient; do
 done
 ```
 
-- Zip names include the version: `ClaudeProxyServer-<version>.zip`, `ClaudeProxyClient-<version>.zip`. (v1.0–v1.0.2 predate this and keep unversioned names; don't rename them.)
+- Zip names include the version: `ClaudeProxyHost-<version>.zip`, `ClaudeProxyClient-<version>.zip`. (v1.0–v1.0.2 predate this and keep their unversioned `ClaudeProxyServer.zip`/`ClaudeProxyClient.zip` names; don't rename them.)
 - Use `ditto -c -k --keepParent`, not `zip`, so the bundle's structure and signature survive.
 
 ### 4. Publish
 
 ```sh
-gh release create v$VERSION "$STAGE/ClaudeProxyServer-$VERSION.zip" "$STAGE/ClaudeProxyClient-$VERSION.zip" \
+gh release create v$VERSION "$STAGE/ClaudeProxyHost-$VERSION.zip" "$STAGE/ClaudeProxyClient-$VERSION.zip" \
 	--target main --title "ClaudeProxy $VERSION" --notes "…"
 ```
 
@@ -76,4 +78,4 @@ Zip *after* stapling, and drop the `xattr` line from the notes footer.
 ## Testing constraints
 
 - Never run `ClaudeProxyClient` on the developer's main Mac: installing it rewrites `~/.claude/settings.json`. Test the client in a VM or on another Mac.
-- The server can be tested locally against a fake upstream by launching it with a scratch config directory: `open --env CLAUDE_CONFIG_DIR=<scratch> ClaudeProxyServer.app`. Never put test settings in the real `~/.claude` or in `/Library/Application Support/ClaudeCode/`.
+- The host can be tested locally against a fake upstream by launching it with a scratch config directory: `open --env CLAUDE_CONFIG_DIR=<scratch> ClaudeProxyHost.app`. A stand-in client can be simulated with `dns-sd -R <name> _claudeproxy-client._tcp local 41822` plus a TCP listener on that port. Never put test settings in the real `~/.claude` or in `/Library/Application Support/ClaudeCode/`.
