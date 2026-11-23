@@ -9,6 +9,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 		static let networkPort = "networkPort"
 		/// Set when the user ticks "Don't ask again"; stops the offer to enable at launch.
 		static let skipInstallOffer = "skipInstallOffer"
+		/// Whether the user wants the client enabled. The settings themselves are only in place while the app runs:
+		/// removed on quit, written again once a host's profile arrives after launch.
+		static let clientEnabled = "clientEnabled"
+	}
+
+	private var wantsEnabled: Bool {
+		get { UserDefaults.standard.bool(forKey: Defaults.clientEnabled) }
+		set { UserDefaults.standard.set(newValue, forKey: Defaults.clientEnabled) }
 	}
 
 	private static let serviceName = Host.current().localizedName ?? "ClaudeProxy Client"
@@ -43,6 +51,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 	}
 
 	func applicationDidFinishLaunching(_ notification: Notification) {
+		// Versions up to 1.3.2 kept the settings in place across quits and had no separate record of the choice.
+		if installer.isInstalled && UserDefaults.standard.object(forKey: Defaults.clientEnabled) == nil {
+			wantsEnabled = true
+		}
 		installEditMenu()
 		statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 		let menu = NSMenu()
@@ -140,9 +152,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 		return env
 	}
 
-	/// Keeps an existing installation in step with the host's profile and the local port.
+	/// While the client is enabled, puts the settings in place once a host's profile is known (after launch) and keeps
+	/// them in step with the profile and the local port.
 	private func syncInstallation() {
-		guard installer.isInstalled, let desiredEnv, desiredEnv != installer.installedEnv else {
+		guard wantsEnabled, let desiredEnv, desiredEnv != installer.installedEnv else {
 			return
 		}
 		do {
@@ -156,7 +169,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 	/// The client is meant to be the way Claude Code works on this Mac, so while it's disabled it offers to enable as
 	/// soon as a host provides the settings: once per launch, until the user ticks "Don't ask again".
 	private func offerInstallIfNeeded() {
-		guard !offeredInstall, !installer.isInstalled, !UserDefaults.standard.bool(forKey: Defaults.skipInstallOffer) else {
+		guard !offeredInstall, !wantsEnabled, !UserDefaults.standard.bool(forKey: Defaults.skipInstallOffer) else {
 			return
 		}
 		offeredInstall = true
@@ -174,6 +187,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 			}
 			return
 		}
+		wantsEnabled = true
 		install()
 	}
 
@@ -271,13 +285,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
 		menu.addItem(.separator())
 		let enabled = item("Client Enabled", #selector(toggleEnabled))
-		enabled.state = installer.isInstalled ? .on : .off
-		enabled.isEnabled = installer.isInstalled || profile != nil
+		enabled.state = wantsEnabled ? .on : .off
 		menu.addItem(enabled)
 		if installer.isInstalled {
 			menu.addItem(info("Claude Code Uses This Proxy (\(SettingsInstaller.displayPath(installer.settingsURL)))"))
-		} else if profile == nil {
-			menu.addItem(info("Available Once a Host Has Connected"))
+		} else if wantsEnabled {
+			menu.addItem(info("Takes Effect Once a Host Has Connected"))
 		}
 		if let installError {
 			menu.addItem(info("⚠︎ \(installError)"))
@@ -356,15 +369,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 	}
 
 	@objc private func toggleEnabled() {
-		if installer.isInstalled {
+		wantsEnabled.toggle()
+		if wantsEnabled {
+			install()
+		} else if installer.isInstalled {
 			uninstall()
 		} else {
-			install()
+			updateIcon()
 		}
 	}
 
+	/// Without a host's profile yet, `syncInstallation()` installs once one arrives.
 	private func install() {
 		guard let desiredEnv else {
+			updateIcon()
 			return
 		}
 		do {
@@ -378,7 +396,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 		updateIcon()
 	}
 
-	/// Disabling is remembered (the install record is gone), and the next launch offers to enable again.
+	/// Disabling is remembered, and the next launch offers to enable again.
 	private func uninstall() {
 		do {
 			try installer.uninstall()
@@ -449,5 +467,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
 	@objc private func quit() {
 		NSApp.terminate(nil)
+	}
+
+	/// Nothing listens on the local port once the app is gone, so Claude Code must stop using it. Covers Quit, logout,
+	/// shutdown and Sparkle relaunches; `wantsEnabled` stays, so the next launch puts the settings back.
+	func applicationWillTerminate(_ notification: Notification) {
+		guard installer.isInstalled else {
+			return
+		}
+		try? installer.uninstall()
 	}
 }
