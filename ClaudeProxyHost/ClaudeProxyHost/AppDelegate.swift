@@ -336,7 +336,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 		let alert = NSAlert()
 		alert.messageText = "Add Client by Address"
 		alert.informativeText = "For a client that isn’t discovered automatically. Its menu has a Copy item for its address."
-		let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 24))
+		let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 220, height: 24))
 		field.placeholderString = "192.168.1.20:\(ClaudeProxyProtocol.defaultClientNetworkPort)"
 		alert.accessoryView = field
 		alert.addButton(withTitle: "Add")

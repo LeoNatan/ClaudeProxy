@@ -431,7 +431,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 		let alert = NSAlert()
 		alert.messageText = title
 		alert.informativeText = message
-		let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 24))
+		let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 220, height: 24))
 		field.stringValue = String(current)
 		alert.accessoryView = field
 		alert.addButton(withTitle: "Save")
