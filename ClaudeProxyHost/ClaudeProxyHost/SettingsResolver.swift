@@ -87,7 +87,7 @@ enum SettingsResolver {
 
 		// Lowest precedence first; each layer overwrites.
 		for (name, value) in shellEnvironment {
-			resolved.env[name] = SettingValue(value: value, source: "login shell")
+			resolved.env[name] = SettingValue(value: value, source: "Login Shell")
 		}
 		apply(env: userSettings["env"], source: userSource, to: &resolved)
 		for tier in managedTiers.reversed() {
@@ -96,7 +96,7 @@ enum SettingsResolver {
 		}
 		for name in shellFirstVariables {
 			if let value = shellEnvironment[name], !value.isEmpty {
-				resolved.env[name] = SettingValue(value: value, source: "login shell")
+				resolved.env[name] = SettingValue(value: value, source: "Login Shell")
 			}
 		}
 
@@ -168,7 +168,7 @@ enum SettingsResolver {
 			}
 			merged = merge(merged, plist)
 		}
-		return merged.isEmpty ? nil : Tier(name: "MDM profile (\(mdmDomain))", settings: merged)
+		return merged.isEmpty ? nil : Tier(name: "MDM Profile (\(mdmDomain))", settings: merged)
 	}
 
 	/// managed-settings.json, then managed-settings.d/*.json alphabetically; later files win.
@@ -195,14 +195,14 @@ enum SettingsResolver {
 		}
 		let age = Date().timeIntervalSince(modified)
 		guard age < remoteSettingsMaxAge else {
-			notes.append("Server-managed settings cache is older than 24 h and was ignored; run claude once to refresh it.")
+			notes.append("Server-Managed Settings Cache Is Older Than 24 h and Was Ignored; Run claude Once to Refresh It.")
 			return nil
 		}
 		guard let json = loadJSON(url, notes: &notes) else {
 			return nil
 		}
 		let settings = (json["settings"] as? [String: Any]) ?? json
-		return Tier(name: "server-managed (cached \(Int(age / 60)) min ago)", settings: settings)
+		return Tier(name: "Server-Managed (Cached \(Int(age / 60)) min Ago)", settings: settings)
 	}
 
 	private static func loadJSON(_ url: URL, notes: inout [String]) -> [String: Any]? {
@@ -210,7 +210,7 @@ enum SettingsResolver {
 			return nil
 		}
 		guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-			notes.append("\(displayPath(url)) is not valid JSON and was ignored.")
+			notes.append("\(displayPath(url)) Is Not Valid JSON and Was Ignored.")
 			return nil
 		}
 		return json

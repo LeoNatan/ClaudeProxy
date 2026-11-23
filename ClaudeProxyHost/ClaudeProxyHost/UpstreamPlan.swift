@@ -78,7 +78,7 @@ struct UpstreamPlan: Sendable {
 		let enabled = Provider.cloud.filter { settings.isTruthy($0.switchVariable!) }
 		let provider = enabled.first ?? .anthropic
 		if enabled.count > 1 {
-			notes.append("Several providers are enabled (\(enabled.map(\.displayName).joined(separator: ", "))); using \(provider.displayName).")
+			notes.append("Several Providers Are Enabled (\(enabled.map(\.displayName).joined(separator: ", "))); Using \(provider.displayName).")
 		}
 		self.provider = provider
 		self.skipAuth = provider.skipAuthVariable.map { settings.isTruthy($0) } ?? false
@@ -98,7 +98,7 @@ struct UpstreamPlan: Sendable {
 		case .vertex:
 			region = settings.value("CLOUD_ML_REGION")
 			if settings.value("ANTHROPIC_VERTEX_PROJECT_ID") == nil {
-				problem = "ANTHROPIC_VERTEX_PROJECT_ID is not set."
+				problem = "ANTHROPIC_VERTEX_PROJECT_ID Is Not Set."
 			}
 		case .foundry:
 			if let resource = settings.value("ANTHROPIC_FOUNDRY_RESOURCE") {
@@ -112,11 +112,11 @@ struct UpstreamPlan: Sendable {
 			if let url = URL(string: string), let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme), url.host != nil {
 				self.baseURL = url
 				if scheme == "http" && !["localhost", "127.0.0.1", "::1"].contains(url.host!) {
-					notes.append("Upstream \(provider.baseURLVariable) is plain http; credentials travel unencrypted to it.")
+					notes.append("Upstream \(provider.baseURLVariable) Is Plain HTTP; Credentials Travel Unencrypted to It.")
 				}
 			} else {
 				self.baseURL = nil
-				problem = "\(provider.baseURLVariable) is not a valid http(s) URL."
+				problem = "\(provider.baseURLVariable) Is Not a Valid http(s) URL."
 			}
 		} else {
 			self.baseURL = nil

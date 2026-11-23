@@ -177,18 +177,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
 		let statuses = links.statuses()
 		let excluded = excludedClients
-		menu.addItem(.sectionHeader(title: "Clients"))
 		if browser.clients.isEmpty && manualClients.isEmpty {
-			menu.addItem(info("None found yet"))
+			menu.addItem(info("No Clients Connected"))
+		} else {
+			menu.addItem(.sectionHeader(title: "Clients"))
 		}
 		func addClient(title: String, key: String) {
 			let status: String
 			switch statuses[key] {
-			case .connected: status = "connected"
-			case .connecting: status = "connecting…"
-			case .unreachable: status = "unreachable"
-			case .otherHost: status = "using another host"
-			case nil: status = "not served"
+			case .connected: status = "Connected"
+			case .connecting: status = "Connecting…"
+			case .unreachable: status = "Unreachable"
+			case .otherHost: status = "Using Another Host"
+			case nil: status = "Not Served"
 			}
 			let client = item("\(title) — \(status)", #selector(toggleClient(_:)))
 			client.representedObject = key
@@ -201,10 +202,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 		for address in manualClients {
 			addClient(title: address, key: Self.manualKey(address))
 		}
-		let add = item("Add Client by Address…", #selector(addManualClient))
+		let add = item("Add Manually…", #selector(addManualClient))
 		menu.addItem(add)
 		if !manualClients.isEmpty {
-			let remove = NSMenuItem(title: "Remove Client by Address", action: nil, keyEquivalent: "")
+			let remove = NSMenuItem(title: "Remove", action: nil, keyEquivalent: "")
 			let removeMenu = NSMenu()
 			for address in manualClients {
 				let entry = item(address, #selector(removeManualClient(_:)))
@@ -234,7 +235,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 					for name in headerNames {
 						details.addItem(info(name, wrapped: false))
 					}
-					details.addItem(info("ANTHROPIC_CUSTOM_HEADERS from \(state.settings.env["ANTHROPIC_CUSTOM_HEADERS"]?.source ?? "?")", wrapped: false))
+					details.addItem(info("ANTHROPIC_CUSTOM_HEADERS From \(state.settings.env["ANTHROPIC_CUSTOM_HEADERS"]?.source ?? "?")", wrapped: false))
 				}
 				credentials.submenu = details
 			} else {
@@ -257,15 +258,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
 			let profile = NSMenuItem(title: "Settings Sent to Clients", action: nil, keyEquivalent: "")
 			let profileMenu = NSMenu()
-			profileMenu.addItem(info("\(state.profile.baseURLVariable) = http://127.0.0.1:<client port>", wrapped: false))
+			profileMenu.addItem(info("\(state.profile.baseURLVariable) = http://127.0.0.1:<Client Port>", wrapped: false))
 			for name in state.profile.env.keys.sorted() {
 				let value = state.profile.env[name]!
-				profileMenu.addItem(info("\(name) = \(value.isEmpty ? "(unset)" : value)", wrapped: false))
+				profileMenu.addItem(info("\(name) = \(value.isEmpty ? "(Unset)" : value)", wrapped: false))
 			}
 			profile.submenu = profileMenu
 			menu.addItem(profile)
 		} else {
-			menu.addItem(info("Reading Claude settings…"))
+			menu.addItem(info("Reading Claude Settings…"))
 		}
 
 		menu.addItem(.separator())
@@ -282,10 +283,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 		let menu = NSMenu()
 		var any = false
 		for name in HostState.displayedVariables {
-			guard let setting = settings.env[name], !(setting.source == "login shell" && setting.value.isEmpty) else {
+			guard let setting = settings.env[name], !(setting.source == "Login Shell" && setting.value.isEmpty) else {
 				continue
 			}
-			let shown = setting.value.isEmpty ? "(unset)" : CredentialStore.isSecret(name) ? "(set)" : setting.value
+			let shown = setting.value.isEmpty ? "(Unset)" : CredentialStore.isSecret(name) ? "(Set)" : setting.value
 			menu.addItem(info("\(name) = \(shown)\n\(setting.source)", wrapped: false))
 			any = true
 		}
@@ -297,10 +298,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 			any = true
 		}
 		if !any {
-			menu.addItem(info("No connection settings found; using api.anthropic.com defaults.", wrapped: false))
+			menu.addItem(info("No Connection Settings Found; Using api.anthropic.com Defaults", wrapped: false))
 		}
 		menu.addItem(.separator())
-		menu.addItem(info("Config directory: \(SettingsResolver.displayPath(settings.configDirectory))", wrapped: false))
+		menu.addItem(info("Config Directory: \(SettingsResolver.displayPath(settings.configDirectory))", wrapped: false))
 		return menu
 	}
 

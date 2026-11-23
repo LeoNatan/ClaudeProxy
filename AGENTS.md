@@ -11,6 +11,8 @@ Each host connection starts with a one-line handshake (protocol v3): the host se
 
 Each folder has its own `.xcodeproj` (folder-synchronized groups). `Constants.swift`, `ProcessRunner.swift`, `MenuText.swift` and `Updater.swift` exist in both apps as copies: change them in both.
 
+Menu item titles, including disabled informational lines and section headers, use Title Case ("Client Enabled", "Available Once a Host Has Connected"), as in Apple's Human Interface Guidelines. Interpolated values (host names, paths, error messages) stay as they are.
+
 Both apps update themselves with [Sparkle](https://sparkle-project.org) (Swift package). Each app's `SUFeedURL` points at an appcast attached to the latest GitHub release: `https://github.com/LeoNatan/ClaudeProxy/releases/latest/download/appcast-host.xml` and `…/appcast-client.xml`. Updates are not EdDSA-signed (no `SUPublicEDKey`): Sparkle accepts them because the update and the installed app carry the same Developer ID signature. Sparkle logs that this mode is deprecated; if a future Sparkle drops it, add a key with `generate_keys`.
 
 ## Release process

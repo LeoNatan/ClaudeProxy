@@ -217,32 +217,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
 		let hasHost = pool.hasHost
 		if let profile {
-			let provider = profile.provider == "anthropic" ? "Anthropic API / gateway" : profile.provider
-			menu.addItem(info("Host: \(profile.name) — \(provider)\(hasHost ? "" : " (disconnected)")"))
+			let provider = profile.provider == "anthropic" ? "Anthropic API / Gateway" : profile.provider
+			menu.addItem(info("Host: \(profile.name) — \(provider)\(hasHost ? "" : " (Disconnected)")"))
 		} else if hasHost {
-			menu.addItem(info(profileError.map { "⚠︎ Host connected, but: \($0)" } ?? "Host connected — loading…"))
+			menu.addItem(info(profileError.map { "⚠︎ Host Connected, but: \($0)" } ?? "Host Connected — Loading…"))
 		} else {
-			menu.addItem(info("Waiting for a ClaudeProxy host to connect"))
+			menu.addItem(info("Waiting for a ClaudeProxy Host to Connect"))
 		}
 
 		switch poolStatus {
 		case .stopped:
 			break
 		case let .listening(port, advertised):
-			menu.addItem(info(advertised ? "Discoverable as “\(pool.serviceName)” on port \(port)" : "Listening on port \(port), not advertised over Bonjour (retrying)"))
+			menu.addItem(info(advertised ? "Discoverable as “\(pool.serviceName)” on Port \(port)" : "Listening on Port \(port), Not Advertised Over Bonjour (Retrying)"))
 			if !advertised {
 				menu.addItem(info("ⓘ Allow ClaudeProxy Client in System Settings › Privacy & Security › Local Network"))
 			}
 		case let .failed(message):
-			menu.addItem(info("⚠︎ Network listener: \(message)"))
+			menu.addItem(info("⚠︎ Network Listener: \(message)"))
 		}
 		switch forwarderStatus {
 		case .stopped:
 			break
 		case let .listening(port):
-			menu.addItem(info("Claude Code connects to 127.0.0.1:\(port)"))
+			menu.addItem(info("Claude Code Connects to 127.0.0.1:\(port)"))
 		case let .failed(message):
-			menu.addItem(info("⚠︎ Local proxy: \(message)"))
+			menu.addItem(info("⚠︎ Local Proxy: \(message)"))
 		}
 
 		let hosts = pool.knownHosts
@@ -250,7 +250,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 			menu.addItem(.separator())
 			menu.addItem(.sectionHeader(title: "Hosts"))
 			for host in hosts {
-				let suffix = host.isSelected ? (hasHost ? "" : " — offline") : ""
+				let suffix = host.isSelected ? (hasHost ? "" : " — Offline") : ""
 				let entry = item(host.name + suffix, #selector(selectHost(_:)))
 				entry.representedObject = host.id
 				entry.state = host.isSelected ? .on : .off
@@ -272,14 +272,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
 		menu.addItem(.separator())
 		if installer.isInstalled {
-			menu.addItem(item("Uninstall from Claude Code", #selector(uninstall)))
-			menu.addItem(info("Claude Code uses this proxy (\(SettingsInstaller.displayPath(installer.settingsURL)))"))
+			menu.addItem(item("Uninstall From Claude Code", #selector(uninstall)))
+			menu.addItem(info("Claude Code Uses This Proxy (\(SettingsInstaller.displayPath(installer.settingsURL)))"))
 		} else {
-			let install = item("Install into Claude Code", #selector(install))
+			let install = item("Install Into Claude Code", #selector(install))
 			install.isEnabled = profile != nil
 			menu.addItem(install)
 			if profile == nil {
-				menu.addItem(info("Available once a host has connected"))
+				menu.addItem(info("Available Once a Host Has Connected"))
 			}
 		}
 		if let installError {
@@ -288,7 +288,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 		if let desiredEnv {
 			let overridden = installer.managedOverrides(for: desiredEnv)
 			if !overridden.isEmpty {
-				menu.addItem(info("⚠︎ Managed settings override: \(overridden.joined(separator: ", "))"))
+				menu.addItem(info("⚠︎ Managed Settings Override: \(overridden.joined(separator: ", "))"))
 			}
 		}
 

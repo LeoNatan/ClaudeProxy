@@ -19,11 +19,11 @@ final class NetworkConfiguration: @unchecked Sendable {
 			if let url = URL(string: proxyString), let scheme = url.scheme?.lowercased(), url.host != nil, ["http", "https"].contains(scheme) {
 				proxyURL = url
 				if scheme == "https" {
-					notes.append("HTTPS proxy URLs are used as plain HTTP CONNECT proxies.")
+					notes.append("HTTPS Proxy URLs Are Used as Plain HTTP CONNECT Proxies.")
 				}
 			} else {
 				proxyURL = nil
-				notes.append("Proxy URL \"\(proxyString)\" is not a valid http(s) URL and was ignored.")
+				notes.append("Proxy URL \"\(proxyString)\" Is Not a Valid http(s) URL and Was Ignored.")
 			}
 		} else {
 			proxyURL = nil
@@ -39,26 +39,26 @@ final class NetworkConfiguration: @unchecked Sendable {
 			if let pem = try? String(contentsOf: url, encoding: .utf8) {
 				anchors = Self.certificates(fromPEM: pem)
 				if anchors.isEmpty {
-					notes.append("NODE_EXTRA_CA_CERTS contains no readable certificates.")
+					notes.append("NODE_EXTRA_CA_CERTS Contains No Readable Certificates.")
 				}
 			} else {
-				notes.append("NODE_EXTRA_CA_CERTS file can't be read.")
+				notes.append("NODE_EXTRA_CA_CERTS File Can't Be Read.")
 			}
 		}
 		if let store = settings.value("CLAUDE_CODE_CERT_STORE"), !store.lowercased().contains("system") {
-			notes.append("CLAUDE_CODE_CERT_STORE=\(store): the macOS system trust store is used in place of Node's bundled CAs.")
+			notes.append("CLAUDE_CODE_CERT_STORE=\(store): The macOS System Trust Store Is Used in Place of Node's Bundled CAs.")
 		}
 		extraAnchors = anchors
 
 		rejectUnauthorized = settings.value("NODE_TLS_REJECT_UNAUTHORIZED") != "0"
 		if !rejectUnauthorized {
-			notes.append("NODE_TLS_REJECT_UNAUTHORIZED=0: upstream certificates are NOT verified.")
+			notes.append("NODE_TLS_REJECT_UNAUTHORIZED=0: Upstream Certificates Are NOT Verified.")
 		}
 
 		if let certificatePath = settings.value("CLAUDE_CODE_CLIENT_CERT"), let keyPath = settings.value("CLAUDE_CODE_CLIENT_KEY") {
 			clientIdentity = Self.identity(certificatePath: certificatePath, keyPath: keyPath, passphrase: settings.value("CLAUDE_CODE_CLIENT_KEY_PASSPHRASE"))
 			if clientIdentity == nil {
-				notes.append("Client certificate (CLAUDE_CODE_CLIENT_CERT/KEY) could not be loaded.")
+				notes.append("Client Certificate (CLAUDE_CODE_CLIENT_CERT/KEY) Could Not Be Loaded.")
 			}
 		} else {
 			clientIdentity = nil
@@ -69,13 +69,13 @@ final class NetworkConfiguration: @unchecked Sendable {
 	var summary: String? {
 		var parts: [String] = []
 		if let proxyURL, let host = proxyURL.host {
-			parts.append("proxy \(host):\(proxyURL.port ?? 80)")
+			parts.append("Proxy \(host):\(proxyURL.port ?? 80)")
 		}
 		if !extraAnchors.isEmpty {
-			parts.append("\(extraAnchors.count) extra CA(s)")
+			parts.append("\(extraAnchors.count) Extra CA(s)")
 		}
 		if clientIdentity != nil {
-			parts.append("client certificate")
+			parts.append("Client Certificate")
 		}
 		return parts.isEmpty ? nil : parts.joined(separator: ", ")
 	}

@@ -64,15 +64,15 @@ final class CredentialStore: @unchecked Sendable {
 
 		var details: [String] = []
 		func describe(_ kind: String, variable: String) -> String {
-			details.append("\(variable) from \(settings.env[variable]?.source ?? "?")")
+			details.append("\(variable) From \(settings.env[variable]?.source ?? "?")")
 			return kind
 		}
 		func describeKey(_ kind: String, key: String) -> String {
-			details.append("\(key) from \(settings.keys[key]?.source ?? "?")")
+			details.append("\(key) From \(settings.keys[key]?.source ?? "?")")
 			return kind
 		}
 		func skipped() -> String {
-			details.append("\(plan.provider.skipAuthVariable!) is set")
+			details.append("\(plan.provider.skipAuthVariable!) Is Set")
 			return "None"
 		}
 
@@ -88,7 +88,7 @@ final class CredentialStore: @unchecked Sendable {
 				summary = describeKey("API Key Helper", key: "apiKeyHelper")
 			} else {
 				summary = "None"
-				problem = "No API credentials found (ANTHROPIC_AUTH_TOKEN, ANTHROPIC_API_KEY or apiKeyHelper). OAuth logins are not used."
+				problem = "No API Credentials Found (ANTHROPIC_AUTH_TOKEN, ANTHROPIC_API_KEY or apiKeyHelper). OAuth Logins Are Not Used."
 			}
 		case .bedrock, .mantle:
 			if plan.skipAuth {
@@ -97,14 +97,14 @@ final class CredentialStore: @unchecked Sendable {
 				summary = describe("Bedrock API Key", variable: "AWS_BEARER_TOKEN_BEDROCK")
 			} else if plan.provider == .mantle {
 				summary = "None"
-				problem = "Bedrock Mantle needs AWS_BEARER_TOKEN_BEDROCK or \(plan.provider.skipAuthVariable!) with a gateway."
+				problem = "Bedrock Mantle Needs AWS_BEARER_TOKEN_BEDROCK or \(plan.provider.skipAuthVariable!) with a Gateway."
 			} else if settings.key("awsCredentialExport") != nil {
 				summary = describeKey("AWS SigV4", key: "awsCredentialExport")
 			} else if settings.value("AWS_ACCESS_KEY_ID") != nil {
 				summary = describe("AWS SigV4", variable: "AWS_ACCESS_KEY_ID")
 			} else {
 				summary = "AWS SigV4"
-				details.append("aws CLI credential chain\(settings.value("AWS_PROFILE").map { " (profile \($0))" } ?? "")")
+				details.append("AWS CLI Credential Chain\(settings.value("AWS_PROFILE").map { " (Profile \($0))" } ?? "")")
 			}
 		case .anthropicAWS:
 			if plan.skipAuth {
@@ -113,14 +113,14 @@ final class CredentialStore: @unchecked Sendable {
 				summary = describe("API Key", variable: "ANTHROPIC_AWS_API_KEY")
 			} else {
 				summary = "None"
-				problem = "Claude Platform on AWS: only ANTHROPIC_AWS_API_KEY is supported (no SigV4)."
+				problem = "Claude Platform on AWS: Only ANTHROPIC_AWS_API_KEY Is Supported (No SigV4)."
 			}
 		case .vertex:
 			if plan.skipAuth {
 				summary = settings.value("ANTHROPIC_AUTH_TOKEN") != nil ? describe("Gateway Bearer Token", variable: "ANTHROPIC_AUTH_TOKEN") : skipped()
 			} else {
 				summary = "Google Cloud Token"
-				details.append("gcloud application-default credentials")
+				details.append("gcloud Application-Default Credentials")
 			}
 		case .foundry:
 			if plan.skipAuth {
@@ -131,7 +131,7 @@ final class CredentialStore: @unchecked Sendable {
 				summary = describe("API Key", variable: "ANTHROPIC_FOUNDRY_API_KEY")
 			} else {
 				summary = "Azure Token"
-				details.append("az CLI credentials")
+				details.append("az CLI Credentials")
 			}
 		}
 		self.summary = summary
