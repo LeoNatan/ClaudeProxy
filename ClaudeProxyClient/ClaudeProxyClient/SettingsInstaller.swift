@@ -9,13 +9,18 @@ final class SettingsInstaller {
 
 	private static let originalsKey = "originalEnv"
 	private static let installedKey = "installedEnv"
+	/// The settings file the install was written to, so uninstall finds it even if CLAUDE_CONFIG_DIR changes.
+	private static let installedPathKey = "installedSettingsPath"
 	/// Stored in place of a value when the key didn't exist before install.
 	private static let absentMarker = "__claudeproxy_absent__"
 
 	private var configDirectory: URL?
 
 	var settingsURL: URL {
-		resolveConfigDirectory().appendingPathComponent("settings.json")
+		if isInstalled, let path = UserDefaults.standard.string(forKey: Self.installedPathKey) {
+			return URL(fileURLWithPath: path)
+		}
+		return resolveConfigDirectory().appendingPathComponent("settings.json")
 	}
 
 	var installedEnv: [String: String]? {
@@ -32,13 +37,23 @@ final class SettingsInstaller {
 		var originals = UserDefaults.standard.dictionary(forKey: Self.originalsKey) as? [String: String] ?? [:]
 		let previous = installedEnv ?? [:]
 
+		// No record of an install, yet the file already points Claude Code at this client: the record was lost. The
+		// values that match are ours, not the user's, so they mustn't become the originals uninstall restores.
+		let recovering = installedEnv == nil && env.contains { key, value in
+			value.hasPrefix("http://127.0.0.1:") && fileEnv[key] as? String == value
+		}
+
 		// Keys we set last time but no longer need go back to what they were.
-		for key in previous.keys where env[key] == nil {
-			restore(key, originals: &originals, env: &fileEnv)
+		for (key, value) in previous where env[key] == nil {
+			restore(key, installedValue: value, originals: &originals, env: &fileEnv)
 		}
 		for (key, value) in env {
 			if originals[key] == nil {
-				originals[key] = fileEnv[key].map { "\($0)" } ?? Self.absentMarker
+				if recovering && fileEnv[key] as? String == value {
+					originals[key] = Self.absentMarker
+				} else {
+					originals[key] = fileEnv[key].map { "\($0)" } ?? Self.absentMarker
+				}
 			}
 			fileEnv[key] = value
 		}
@@ -48,14 +63,15 @@ final class SettingsInstaller {
 		try writeSettings(settings)
 		UserDefaults.standard.set(originals, forKey: Self.originalsKey)
 		UserDefaults.standard.set(env, forKey: Self.installedKey)
+		UserDefaults.standard.set(settingsURL.path, forKey: Self.installedPathKey)
 	}
 
 	func uninstall() throws {
 		var settings = try readSettings()
 		var fileEnv = settings["env"] as? [String: Any] ?? [:]
 		var originals = UserDefaults.standard.dictionary(forKey: Self.originalsKey) as? [String: String] ?? [:]
-		for key in (installedEnv ?? [:]).keys {
-			restore(key, originals: &originals, env: &fileEnv)
+		for (key, value) in installedEnv ?? [:] {
+			restore(key, installedValue: value, originals: &originals, env: &fileEnv)
 		}
 		if fileEnv.isEmpty {
 			settings["env"] = nil
@@ -65,6 +81,7 @@ final class SettingsInstaller {
 		try writeSettings(settings)
 		UserDefaults.standard.removeObject(forKey: Self.originalsKey)
 		UserDefaults.standard.removeObject(forKey: Self.installedKey)
+		UserDefaults.standard.removeObject(forKey: Self.installedPathKey)
 	}
 
 	/// Managed settings on this Mac outrank user settings; report keys where they'd override the install.
@@ -109,8 +126,13 @@ final class SettingsInstaller {
 
 	// MARK: Private
 
-	private func restore(_ key: String, originals: inout [String: String], env: inout [String: Any]) {
-		if let original = originals.removeValue(forKey: key), original != Self.absentMarker {
+	/// Puts back what `key` held before install, unless the user has changed it since; then their value stays.
+	private func restore(_ key: String, installedValue: String, originals: inout [String: String], env: inout [String: Any]) {
+		let original = originals.removeValue(forKey: key)
+		guard env[key] as? String == installedValue else {
+			return
+		}
+		if let original, original != Self.absentMarker {
 			env[key] = original
 		} else {
 			env[key] = nil
@@ -147,18 +169,21 @@ final class SettingsInstaller {
 	}
 
 	private func writeSettings(_ settings: [String: Any]) throws {
-		let directory = settingsURL.deletingLastPathComponent()
-		try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+		// An atomic write replaces the file it names; for a symlinked settings.json (dotfiles) that must be the target,
+		// not the link.
+		let target = settingsURL.resolvingSymlinksInPath()
+		try FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
 		var data = try JSONSerialization.data(withJSONObject: settings, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
 		data.append(0x0A)
-		try data.write(to: settingsURL, options: .atomic)
+		try data.write(to: target, options: .atomic)
 	}
 
 	private func backUpOnce() throws {
 		let backup = settingsURL.appendingPathExtension("claudeproxy-backup")
-		guard FileManager.default.fileExists(atPath: settingsURL.path), !FileManager.default.fileExists(atPath: backup.path) else {
+		let source = settingsURL.resolvingSymlinksInPath()
+		guard FileManager.default.fileExists(atPath: source.path), !FileManager.default.fileExists(atPath: backup.path) else {
 			return
 		}
-		try FileManager.default.copyItem(at: settingsURL, to: backup)
+		try FileManager.default.copyItem(at: source, to: backup)
 	}
 }
