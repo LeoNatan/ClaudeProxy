@@ -7,8 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 	private enum Defaults {
 		static let localPort = "localPort"
 		static let networkPort = "networkPort"
-		/// Set when the user uninstalls from the menu or ticks "Don't ask again"; stops the automatic install offer
-		/// until they install from the menu.
+		/// Set when the user ticks "Don't ask again"; stops the offer to enable at launch.
 		static let skipInstallOffer = "skipInstallOffer"
 	}
 
@@ -154,8 +153,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 		}
 	}
 
-	/// The client is meant to be the way Claude Code works on this Mac, so it offers to install as soon as a host
-	/// provides the settings: once per launch, and never again after the user uninstalls from the menu or opts out.
+	/// The client is meant to be the way Claude Code works on this Mac, so while it's disabled it offers to enable as
+	/// soon as a host provides the settings: once per launch, until the user ticks "Don't ask again".
 	private func offerInstallIfNeeded() {
 		guard !offeredInstall, !installer.isInstalled, !UserDefaults.standard.bool(forKey: Defaults.skipInstallOffer) else {
 			return
@@ -163,9 +162,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 		offeredInstall = true
 		NSApp.activate()
 		let alert = NSAlert()
-		alert.messageText = "Use ClaudeProxy for Claude Code on this Mac?"
-		alert.informativeText = "Claude Code will connect through this client with no login needed here."
-		alert.addButton(withTitle: "Install")
+		alert.messageText = "Enable ClaudeProxy Client?"
+		alert.informativeText = "Claude Code on this Mac will connect through this client with no login needed here."
+		alert.addButton(withTitle: "Enable")
 		alert.addButton(withTitle: "Not Now")
 		alert.showsSuppressionButton = true
 		alert.suppressionButton?.title = "Don’t ask again"
@@ -271,16 +270,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 		}
 
 		menu.addItem(.separator())
+		let enabled = item("Client Enabled", #selector(toggleEnabled))
+		enabled.state = installer.isInstalled ? .on : .off
+		enabled.isEnabled = installer.isInstalled || profile != nil
+		menu.addItem(enabled)
 		if installer.isInstalled {
-			menu.addItem(item("Uninstall From Claude Code", #selector(uninstall)))
 			menu.addItem(info("Claude Code Uses This Proxy (\(SettingsInstaller.displayPath(installer.settingsURL)))"))
-		} else {
-			let install = item("Install Into Claude Code", #selector(install))
-			install.isEnabled = profile != nil
-			menu.addItem(install)
-			if profile == nil {
-				menu.addItem(info("Available Once a Host Has Connected"))
-			}
+		} else if profile == nil {
+			menu.addItem(info("Available Once a Host Has Connected"))
 		}
 		if let installError {
 			menu.addItem(info("⚠︎ \(installError)"))
@@ -358,14 +355,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 		NSPasteboard.general.setString(value, forType: .string)
 	}
 
-	@objc private func install() {
+	@objc private func toggleEnabled() {
+		if installer.isInstalled {
+			uninstall()
+		} else {
+			install()
+		}
+	}
+
+	private func install() {
 		guard let desiredEnv else {
 			return
 		}
 		do {
 			try installer.install(env: desiredEnv)
 			installError = nil
-			UserDefaults.standard.removeObject(forKey: Defaults.skipInstallOffer)
 		} catch {
 			installError = error.localizedDescription
 			NSApp.activate()
@@ -374,11 +378,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 		updateIcon()
 	}
 
-	@objc private func uninstall() {
+	/// Disabling is remembered (the install record is gone), and the next launch offers to enable again.
+	private func uninstall() {
 		do {
 			try installer.uninstall()
 			installError = nil
-			UserDefaults.standard.set(true, forKey: Defaults.skipInstallOffer)
 		} catch {
 			installError = error.localizedDescription
 			NSApp.activate()
