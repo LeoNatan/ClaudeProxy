@@ -33,7 +33,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 	func applicationDidFinishLaunching(_ notification: Notification) {
 		installEditMenu()
 		statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-		statusItem.button?.image = NSImage(systemSymbolName: "xserve.raid", accessibilityDescription: "ClaudeProxy Host")
+		updateIcon()
 		let menu = NSMenu()
 		menu.delegate = self
 		statusItem.menu = menu
@@ -144,10 +144,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 		links.setClients(targets)
 	}
 
+	/// A configuration problem that stops every request (warning) takes precedence; otherwise a checkmark while at
+	/// least one client is connected, and an ellipsis while none is.
 	private func updateIcon() {
-		// Only a configuration problem that stops every request earns the warning; still loading settings doesn't.
-		let healthy = state.map { $0.problems.isEmpty } ?? true
-		statusItem.button?.image = NSImage(systemSymbolName: healthy ? "xserve.raid" : "exclamationmark.triangle", accessibilityDescription: "ClaudeProxy Host")
+		let name: String
+		if let state, !state.problems.isEmpty {
+			name = "xserve.raid.trianglebadge.exclamationmark"
+		} else if links.statuses().values.contains(.connected) {
+			name = "xserve.raid.badge.checkmark"
+		} else {
+			name = "xserve.raid.badge.ellipsis"
+		}
+		let image = NSImage(symbolName: name, bundle: .main, variableValue: 0)
+		image?.accessibilityDescription = "ClaudeProxy Host"
+		statusItem.button?.image = image
 	}
 
 	/// Menu bar apps get no main menu, and without an Edit menu text fields don't receive ⌘X/⌘C/⌘V/⌘A/⌘Z.
